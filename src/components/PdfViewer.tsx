@@ -3,6 +3,7 @@
 import { Card } from '@/components/ui/card';
 import dynamic from 'next/dynamic';
 import { useState, useEffect } from 'react';
+import { useFileContext } from '@/contexts/FileContext';
 
 // 使用动态导入，但不指定 loading 组件
 // 让 PdfViewerClient 内部处理所有加载状态
@@ -17,6 +18,20 @@ const PdfViewerClient = dynamic(
 export function PdfViewer() {
   // 添加浏览器性能检测
   const [isHighPerformance, setIsHighPerformance] = useState<boolean | null>(null);
+  const { selectedPdfFile, fetchDirectoryContent } = useFileContext();
+
+  // 确保从最近阅读记录进入时加载PDF所在目录的内容
+  useEffect(() => {
+    if (selectedPdfFile) {
+      const pdfPath = selectedPdfFile.path;
+      const pdfDir = pdfPath.substring(0, pdfPath.lastIndexOf('/'));
+
+      // 预加载当前PDF所在目录的内容，以便正确关联音频文件
+      fetchDirectoryContent(pdfDir).catch(error => {
+        console.error('加载PDF目录内容失败:', error);
+      });
+    }
+  }, [selectedPdfFile, fetchDirectoryContent]);
 
   useEffect(() => {
     // 检测设备性能

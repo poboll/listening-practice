@@ -37,61 +37,85 @@ export function AudioPlayerClient() {
   const [isVolumeSliderVisible, setIsVolumeSliderVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isPlayerVisible, setIsPlayerVisible] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isAudioSourceSet, setIsAudioSourceSet] = useState(false);
+  const lastAudioPathRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (currentAudioFile) {
+      console.log('AudioPlayerClient: 显示音频播放器，当前文件:', currentAudioFile);
       setIsPlayerVisible(true);
+      setLoadError(null);
     } else {
+      console.log('AudioPlayerClient: 隐藏音频播放器');
       setIsPlayerVisible(false);
       setIsPlaying(false);
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.src = '';
       }
+      setIsAudioSourceSet(false);
+      lastAudioPathRef.current = null;
     }
   }, [currentAudioFile]);
 
   useEffect(() => {
-    if (isPlayerVisible && currentAudioFile && audioRef.current) {
-      console.log('AudioPlayerClient: currentAudioFile changed', currentAudioFile);
-      setIsLoading(true);
-      setCurrentTime(0);
-      setDuration(0);
+    if (!isPlayerVisible || !currentAudioFile || !audioRef.current) return;
 
-      const audioSrc = `/content/${currentAudioFile.path}`;
-      if (audioRef.current.src !== audioSrc) {
-        audioRef.current.src = audioSrc;
-        audioRef.current.load();
-        console.log('AudioPlayerClient: Loading new audio source:', audioSrc);
-      } else {
-        setIsLoading(false);
-      }
+    const audioSrc = currentAudioFile.path.startsWith('/')
+      ? `/content${currentAudioFile.path}`
+      : `/content/${currentAudioFile.path}`;
 
-      const index = audioFiles.findIndex(file => file.path === currentAudioFile.path);
-      if (index !== -1) {
-        setCurrentAudioIndex(index);
-      } else {
-        setCurrentAudioIndex(-1);
-      }
-    } else if (!currentAudioFile && audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
-      setIsLoading(false);
-      setIsPlaying(false);
-      setCurrentTime(0);
-      setDuration(0);
-      setCurrentAudioIndex(-1);
+    if (lastAudioPathRef.current === audioSrc && isAudioSourceSet) {
+      console.log('AudioPlayerClient: 跳过重复加载相同音频源');
+      return;
     }
-  }, [isPlayerVisible, currentAudioFile, audioFiles]);
+
+    console.log('AudioPlayerClient: 准备加载音频:', audioSrc);
+    lastAudioPathRef.current = audioSrc;
+
+    setIsLoading(true);
+    setCurrentTime(0);
+    setDuration(0);
+    setLoadError(null);
+    setIsAudioSourceSet(true);
+
+    try {
+      audioRef.current.src = audioSrc;
+      audioRef.current.load();
+      console.log('AudioPlayerClient: 加载新音频源:', audioSrc);
+
+      const loadTimeout = setTimeout(() => {
+        if (isLoading && audioRef.current) {
+          console.warn('AudioPlayerClient: 音频加载超时');
+          setLoadError('加载超时，请重试');
+          setIsLoading(false);
+        }
+      }, 10000);
+
+      return () => clearTimeout(loadTimeout);
+    } catch (err) {
+      console.error('AudioPlayerClient: 音频加载出错:', err);
+      setLoadError('音频文件加载失败');
+      setIsLoading(false);
+      setIsAudioSourceSet(false);
+    }
+  }, [isPlayerVisible, currentAudioFile]);
 
   useEffect(() => {
     if (directoryContent) {
       const mp3Files = directoryContent.items
         .filter(item => !item.isDirectory && item.type === 'mp3');
       setAudioFiles(mp3Files);
-      console.log('AudioPlayerClient: Updated audio files list', mp3Files);
-      if (currentAudioFile && !mp3Files.some(f => f.path === currentAudioFile.path)) {
-        console.warn('AudioPlayerClient: Current audio file not found in updated list.');
+      console.log('AudioPlayerClient: 更新音频文件列表', mp3Files);
+
+      if (currentAudioFile && mp3Files.length > 0) {
+        const index = mp3Files.findIndex(file => file.path === currentAudioFile.path);
+        if (index !== -1) {
+          setCurrentAudioIndex(index);
+        } else {
+          setCurrentAudioIndex(-1);
+        }
       }
     }
   }, [directoryContent, currentAudioFile]);
@@ -107,63 +131,101 @@ export function AudioPlayerClient() {
     };
 
     const handleLoadedData = () => {
+      console.log('AudioPlayerClient: 音频数据已加载，准备播放');
       if (!isNaN(audio.duration) && isFinite(audio.duration)) {
-        console.log('AudioPlayerClient: Audio loaded data. Duration:', audio.duration);
+        console.log('AudioPlayerClient: 音频时长:', audio.duration);
         setDuration(audio.duration);
         setIsLoading(false);
+        setLoadError(null);
+
         if (isPlaying) {
+          console.log('AudioPlayerClient: 尝试自动播放');
           audio.play().catch(err => {
-            console.error('AudioPlayerClient: Playback failed after loadeddata:', err);
+            console.error('AudioPlayerClient: 加载后自动播放失败:', err);
             setIsPlaying(false);
+            setLoadError('浏览器阻止了自动播放');
+            toast({
+              title: "播放失败",
+              description: "浏览器阻止了自动播放，请手动点击播放按钮",
+              variant: "destructive",
+            });
           });
         }
       } else {
-        console.warn('AudioPlayerClient: Loaded data but duration is invalid:', audio.duration);
+        console.warn('AudioPlayerClient: 音频时长无效:', audio.duration);
         setIsLoading(false);
+        setLoadError('音频文件格式错误');
       }
     };
 
     const handleEnded = () => {
-      console.log('AudioPlayerClient: Audio ended.');
+      console.log('AudioPlayerClient: 音频播放结束');
       setIsPlaying(false);
       setCurrentTime(duration);
       if (currentAudioIndex !== -1 && currentAudioIndex < audioFiles.length - 1) {
         playNext();
       } else {
-        console.log('AudioPlayerClient: Reached end of playlist.');
+        console.log('AudioPlayerClient: 已到达播放列表末尾');
       }
     };
 
     const handleLoadingStart = () => {
-      console.log('AudioPlayerClient: Loading audio started.');
+      console.log('AudioPlayerClient: 音频开始加载');
       setIsLoading(true);
+      setLoadError(null);
     };
 
     const handleWaiting = () => {
-      console.log('AudioPlayerClient: Audio waiting for data (buffering).');
+      console.log('AudioPlayerClient: 音频等待数据（缓冲中）');
       setIsLoading(true);
     };
 
     const handlePlaying = () => {
-      console.log('AudioPlayerClient: Audio playing.');
+      console.log('AudioPlayerClient: 音频开始播放');
       setIsLoading(false);
       setIsPlaying(true);
+      setLoadError(null);
     };
 
     const handleCanPlay = () => {
-      console.log('AudioPlayerClient: Audio can play.');
+      console.log('AudioPlayerClient: 音频可以播放了');
       setIsLoading(false);
+      setLoadError(null);
     };
 
     const handleError = (e: Event) => {
-      console.error('AudioPlayerClient: Audio loading error:', e, audio?.error);
+      const errorCode = audio?.error?.code;
+      const errorMessage = audio?.error?.message;
+
+      console.error('AudioPlayerClient: 音频加载错误:', {
+        errorCode,
+        errorMessage,
+        errorDetails: audio?.error,
+        event: e
+      });
+
+      let userErrorMessage = '未知错误';
+
+      if (errorCode === 1) {
+        userErrorMessage = '音频获取被中断';
+      } else if (errorCode === 2) {
+        userErrorMessage = '网络错误';
+      } else if (errorCode === 3) {
+        userErrorMessage = '音频解码失败，可能是格式不支持';
+      } else if (errorCode === 4) {
+        userErrorMessage = '音频源不可用或格式不支持';
+      }
+
       setIsLoading(false);
       setIsPlaying(false);
       setDuration(0);
       setCurrentTime(0);
+      setLoadError(userErrorMessage);
+      setIsAudioSourceSet(false);
+
       toast({
         title: "音频加载错误",
-        description: `无法加载音频文件: ${audio?.error?.message || '未知错误'}`,
+        description: `无法加载音频文件: ${userErrorMessage}`,
         variant: "destructive",
       });
     };
@@ -194,23 +256,58 @@ export function AudioPlayerClient() {
 
   const handlePlayPause = () => {
     if (!audioRef.current || !currentAudioFile) {
-      console.warn('AudioPlayerClient: Play/Pause attempted without audio element or file.');
+      console.warn('AudioPlayerClient: 尝试播放/暂停，但没有音频元素或文件');
+      return;
+    }
+
+    if (isLoading && !loadError) {
+      console.log('AudioPlayerClient: 正在加载中，忽略播放/暂停请求');
+      return;
+    }
+
+    if (loadError) {
+      console.log('AudioPlayerClient: 之前有加载错误，尝试重新加载');
+      setLoadError(null);
+
+      if (currentAudioFile) {
+        const audioSrc = currentAudioFile.path.startsWith('/')
+          ? `/content${currentAudioFile.path}`
+          : `/content/${currentAudioFile.path}`;
+
+        audioRef.current.src = audioSrc;
+        audioRef.current.load();
+        setIsLoading(true);
+        setIsAudioSourceSet(true);
+      }
       return;
     }
 
     if (isPlaying) {
       audioRef.current.pause();
       setIsPlaying(false);
-      console.log('AudioPlayerClient: Paused manually.');
+      console.log('AudioPlayerClient: 手动暂停');
     } else {
+      setIsLoading(true);
+      console.log('AudioPlayerClient: 尝试手动播放');
+
+      if (audioRef.current.readyState === 0) {
+        audioRef.current.load();
+      }
+
       audioRef.current.play().then(() => {
-        console.log('AudioPlayerClient: Playing manually.');
+        console.log('AudioPlayerClient: 开始播放');
         setIsPlaying(true);
+        setIsLoading(false);
       }).catch(err => {
-        console.error('AudioPlayerClient: Manual play failed:', err);
+        console.error('AudioPlayerClient: 手动播放失败:', err);
         setIsLoading(false);
         setIsPlaying(false);
-        toast({ title: "播放失败", description: "浏览器可能阻止了自动播放，请再次尝试。", variant: "destructive" });
+        setLoadError('播放失败，请重试');
+        toast({
+          title: "播放失败",
+          description: "浏览器可能阻止了播放，请再次尝试或检查音频文件是否有效",
+          variant: "destructive"
+        });
       });
     }
   };
@@ -222,7 +319,7 @@ export function AudioPlayerClient() {
       audioRef.current.currentTime = Math.min(newTime, duration);
       setCurrentTime(Math.min(newTime, duration));
     } else {
-      console.warn('AudioPlayerClient: Seek attempted before duration is known.');
+      console.warn('AudioPlayerClient: 尝试跳转播放位置，但音频时长未知');
     }
   };
 
@@ -273,11 +370,12 @@ export function AudioPlayerClient() {
     if (audioFiles.length === 0 || currentAudioIndex >= audioFiles.length - 1) return;
     const nextIndex = currentAudioIndex + 1;
     if (audioFiles[nextIndex]) {
+      setIsAudioSourceSet(false);
       playAudio(audioFiles[nextIndex]);
       setIsPlaying(true);
-      console.log('AudioPlayerClient: Playing next audio.');
+      console.log('AudioPlayerClient: 播放下一个音频');
     } else {
-      console.warn('AudioPlayerClient: Next audio file not found at index:', nextIndex);
+      console.warn('AudioPlayerClient: 没有找到索引为', nextIndex, '的下一个音频文件');
     }
   };
 
@@ -285,11 +383,12 @@ export function AudioPlayerClient() {
     if (audioFiles.length === 0 || currentAudioIndex <= 0) return;
     const prevIndex = currentAudioIndex - 1;
     if (audioFiles[prevIndex]) {
+      setIsAudioSourceSet(false);
       playAudio(audioFiles[prevIndex]);
       setIsPlaying(true);
-      console.log('AudioPlayerClient: Playing previous audio.');
+      console.log('AudioPlayerClient: 播放上一个音频');
     } else {
-      console.warn('AudioPlayerClient: Previous audio file not found at index:', prevIndex);
+      console.warn('AudioPlayerClient: 没有找到索引为', prevIndex, '的上一个音频文件');
     }
   };
 
@@ -357,7 +456,12 @@ export function AudioPlayerClient() {
                     <h3 className="text-sm font-medium truncate text-foreground">
                       {fileName}
                     </h3>
-                    {audioFiles.length > 1 && (
+                    {loadError && (
+                      <p className="text-xs text-red-500 truncate">
+                        错误: {loadError}
+                      </p>
+                    )}
+                    {!loadError && audioFiles.length > 1 && (
                       <p className="text-xs text-muted-foreground">
                         {displayIndex} / {audioFiles.length}
                       </p>
@@ -451,11 +555,13 @@ export function AudioPlayerClient() {
                     variant="outline"
                     size="icon"
                     onClick={handlePlayPause}
-                    disabled={isLoading}
-                    className="rounded-full h-10 w-10 border-border/50 bg-background hover:bg-muted/50"
+                    disabled={isLoading && !loadError}
+                    className={`rounded-full h-10 w-10 border-border/50 bg-background hover:bg-muted/50 ${loadError ? 'border-red-400' : ''}`}
                   >
                     {isLoading ? (
                       <Loader2 className="h-5 w-5 text-primary animate-spin" />
+                    ) : loadError ? (
+                      <Play className="h-5 w-5 text-red-500 ml-0.5" />
                     ) : isPlaying ? (
                       <Pause className="h-5 w-5 text-primary" />
                     ) : (

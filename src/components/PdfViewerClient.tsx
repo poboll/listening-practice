@@ -147,7 +147,7 @@ interface PdfViewerClientProps {
 // 添加 Props 定义并解构
 export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
   const router = useRouter();
-  const { selectedPdfFile, setSelectedFile, directoryContent, playAudio, clearAudio } = useFileContext();
+  const { selectedPdfFile, setSelectedFile, directoryContent, playAudio, clearAudio, fetchDirectoryContent } = useFileContext();
   const { updateReadingProgress, exitReading } = useReadingProgress();
   const { toast } = useToast();
   const { cacheExists, saveToCache, getFromCache, clearCache } = usePdfCache();
@@ -349,34 +349,56 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
   }, [directoryContent, selectedPdfFile]);
 
   // 扫描相关音频文件的函数
-  const scanForRelatedAudioFiles = () => {
-    if (!selectedPdfFile || !directoryContent) return;
+  const scanForRelatedAudioFiles = async () => {
+    if (!selectedPdfFile) return;
 
     try {
-      // 获取PDF文件所在目录
       const pdfPath = selectedPdfFile.path;
       const pdfDir = pdfPath.substring(0, pdfPath.lastIndexOf('/'));
       const pdfBaseName = pdfPath.substring(pdfPath.lastIndexOf('/') + 1).replace('.pdf', '');
 
-      // 过滤出同目录的音频文件
-      const relatedAudioFiles = directoryContent.items.filter(item => {
-        if (item.isDirectory || item.type !== 'mp3') return false;
+      // 检查是否有目录内容，如果没有先加载当前PDF所在目录
+      if (!directoryContent || directoryContent.path !== pdfDir) {
+        console.log('从PDF直接进入，需要加载目录内容:', pdfDir);
+        // 先尝试加载PDF所在目录的内容
+        await fetchDirectoryContent(pdfDir);
+      }
 
-        // 检查是否在同一目录
-        const itemDir = item.path.substring(0, item.path.lastIndexOf('/'));
-        const itemBaseName = item.path.substring(item.path.lastIndexOf('/') + 1).replace('.mp3', '');
+      // 现在directoryContent应该已经更新了，再次检查
+      if (directoryContent) {
+        // 过滤出同目录的音频文件
+        const relatedAudioFiles = directoryContent.items.filter(item => {
+          if (item.isDirectory || item.type !== 'mp3') return false;
 
-        // 文件名相似或在同一目录
-        return itemDir === pdfDir ||
-          itemBaseName.includes(pdfBaseName) ||
-          pdfBaseName.includes(itemBaseName);
-      });
+          // 检查是否在同一目录
+          const itemDir = item.path.substring(0, item.path.lastIndexOf('/'));
+          const itemBaseName = item.path.substring(item.path.lastIndexOf('/') + 1).replace('.mp3', '');
 
-      setAudioFiles(relatedAudioFiles);
+          // 文件名相似或在同一目录
+          return itemDir === pdfDir && (
+            itemBaseName.includes(pdfBaseName) ||
+            pdfBaseName.includes(itemBaseName) ||
+            // 宽松匹配规则，只要同一目录下的MP3文件都考虑
+            itemDir === pdfDir
+          );
+        });
 
-      // 不再自动显示播放器 - 移除这段自动切换showAudioPlayer的逻辑
+        console.log('发现相关音频文件:', relatedAudioFiles.length, relatedAudioFiles);
+        setAudioFiles(relatedAudioFiles);
+
+        // 如果有音频文件但尚未设置当前音频，自动设置第一个
+        if (relatedAudioFiles.length > 0 && !currentAudioFile) {
+          setCurrentAudioIndex(0);
+        }
+      }
     } catch (error) {
       console.error('扫描音频文件失败:', error);
+      toast({
+        title: "音频扫描失败",
+        description: "无法加载相关音频文件",
+        variant: "destructive",
+        duration: 3000,
+      });
     }
   };
 
@@ -1083,6 +1105,22 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
 
   // 音频播放功能 - 修改toggleAudioPlayer使用全局状态
   const toggleAudioPlayer = () => {
+    // 确保已经扫描到了音频文件
+    if (audioFiles.length === 0) {
+      // 如果没有音频文件，尝试再次扫描
+      scanForRelatedAudioFiles();
+
+      // 如果仍然没有找到，显示提示
+      if (audioFiles.length === 0) {
+        toast({
+          title: "未找到音频文件",
+          description: "当前PDF没有相关联的音频文件",
+          duration: 3000,
+        });
+        return;
+      }
+    }
+
     // 如果当前有音频文件正在播放，则停止播放
     if (audioFiles.length > 0 && currentAudioIndex >= 0 && currentAudioIndex < audioFiles.length) {
       clearAudio();
@@ -1091,6 +1129,7 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
     // 如果有可用的音频文件但未播放，则开始播放第一个
     else if (audioFiles.length > 0) {
       playAudio(audioFiles[0]);
+      setCurrentAudioIndex(0);
     }
   };
 
