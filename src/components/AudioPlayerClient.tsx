@@ -33,7 +33,7 @@ export function AudioPlayerClient() {
   const [volume, setVolume] = useState(0.7);
   const [isMuted, setIsMuted] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [playbackRate, setPlaybackRate] = useState(1);
+  const [playbackRate, setPlaybackRate] = useState(0.9);
   const [isVolumeSliderVisible, setIsVolumeSliderVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isPlayerVisible, setIsPlayerVisible] = useState(false);
@@ -382,13 +382,17 @@ export function AudioPlayerClient() {
                         value={playbackRate.toString()}
                         onValueChange={changePlaybackRate}
                       >
-                        <DropdownMenuRadioItem value="0.5" className="text-xs">0.5x</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="0.75" className="text-xs">0.75x</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="0.6" className="text-xs">0.6x</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="0.7" className="text-xs">0.7x</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="0.8" className="text-xs">0.8x</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="0.85" className="text-xs">0.85x</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="0.9" className="text-xs">0.9x</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="0.95" className="text-xs">0.95x</DropdownMenuRadioItem>
                         <DropdownMenuRadioItem value="1" className="text-xs">1.0x</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="1.25" className="text-xs">1.25x</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="1.5" className="text-xs">1.5x</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="1.75" className="text-xs">1.75x</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="2" className="text-xs">2.0x</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="1.05" className="text-xs">1.05x</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="1.1" className="text-xs">1.1x</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="1.15" className="text-xs">1.15x</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="1.2" className="text-xs">1.2x</DropdownMenuRadioItem>
                       </DropdownMenuRadioGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>

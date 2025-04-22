@@ -147,7 +147,7 @@ interface PdfViewerClientProps {
 // 添加 Props 定义并解构
 export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
   const router = useRouter();
-  const { selectedPdfFile, setSelectedFile, directoryContent, playAudio } = useFileContext();
+  const { selectedPdfFile, setSelectedFile, directoryContent, playAudio, clearAudio } = useFileContext();
   const { updateReadingProgress, exitReading } = useReadingProgress();
   const { toast } = useToast();
   const { cacheExists, saveToCache, getFromCache, clearCache } = usePdfCache();
@@ -193,14 +193,12 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
   const [scrollMode, setScrollMode] = useState<boolean>(true);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const audioPlayerManuallyToggled = useRef<boolean>(false);
 
-  // 音频播放相关状态
-  const [showAudioPlayer, setShowAudioPlayer] = useState<boolean>(false);
+  // 音频播放相关状态 - 移除本地状态，使用FileContext中的全局状态
   const [audioFiles, setAudioFiles] = useState<any[]>([]);
   const [currentAudioIndex, setCurrentAudioIndex] = useState<number>(0);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [playbackRate, setPlaybackRate] = useState<number>(1.0);
+  // 移除isPlaying和showAudioPlayer本地状态
+  // 移除playbackRate本地状态
   const audioPlayerRef = useRef<any>(null);
 
   // 移动设备检测
@@ -242,13 +240,9 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
       setAnnotations([]);
       setCurrentTool('none');
       setInitialLoad(true);
-      setShowAudioPlayer(false);
-      setScrollMode(true);
       // 重置加载尝试次数
       setLoadAttempts(0);
       setWorkerLoaded(false);
-      // 重置音频播放器手动切换标志
-      audioPlayerManuallyToggled.current = false;
       // 重置文档加载状态
       setDocumentLoaded(false);
 
@@ -332,7 +326,7 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
         console.error('恢复阅读位置失败:', error);
       }
 
-      // 检测同目录下的音频文件
+      // 扫描相关音频文件的函数
       scanForRelatedAudioFiles();
     }
 
@@ -380,13 +374,7 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
 
       setAudioFiles(relatedAudioFiles);
 
-      // 不再自动显示播放器，而是只在有未显示的音频文件时自动显示
-      if (relatedAudioFiles.length > 0 && !showAudioPlayer && !audioPlayerManuallyToggled.current) {
-        // 延迟显示以避免干扰PDF加载
-        setTimeout(() => {
-          setShowAudioPlayer(true);
-        }, 1500);
-      }
+      // 不再自动显示播放器 - 移除这段自动切换showAudioPlayer的逻辑
     } catch (error) {
       console.error('扫描音频文件失败:', error);
     }
@@ -730,13 +718,9 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
       setAnnotations([]);
       setCurrentTool('none');
       setInitialLoad(true);
-      setShowAudioPlayer(false);
-      setScrollMode(true);
       // 重置加载尝试次数
       setLoadAttempts(0);
       setWorkerLoaded(false);
-      // 重置音频播放器手动切换标志
-      audioPlayerManuallyToggled.current = false;
       // 重置文档加载状态
       setDocumentLoaded(false);
 
@@ -820,7 +804,7 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
         console.error('恢复阅读位置失败:', error);
       }
 
-      // 检测同目录下的音频文件
+      // 扫描相关音频文件的函数
       scanForRelatedAudioFiles();
     }
 
@@ -1085,9 +1069,8 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
         completionPercentage
       });
 
-      // 关闭音频播放器
-      setShowAudioPlayer(false);
-      audioPlayerManuallyToggled.current = false;
+      // 关闭音频播放器 - 使用clearAudio方法关闭全局音频播放器
+      clearAudio();
 
       // 退出阅读，返回首页
       exitReading();
@@ -1098,20 +1081,23 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
     }
   };
 
-  // 音频播放功能
+  // 音频播放功能 - 修改toggleAudioPlayer使用全局状态
   const toggleAudioPlayer = () => {
-    // 标记用户已手动切换播放器状态
-    audioPlayerManuallyToggled.current = true;
-    setShowAudioPlayer(prev => !prev);
+    // 如果当前有音频文件正在播放，则停止播放
+    if (audioFiles.length > 0 && currentAudioIndex >= 0 && currentAudioIndex < audioFiles.length) {
+      clearAudio();
+      playAudio(audioFiles[currentAudioIndex]);
+    }
+    // 如果有可用的音频文件但未播放，则开始播放第一个
+    else if (audioFiles.length > 0) {
+      playAudio(audioFiles[0]);
+    }
   };
 
   const playAudioFile = (index: number) => {
     if (audioFiles.length > 0 && index >= 0 && index < audioFiles.length) {
       setCurrentAudioIndex(index);
-      setShowAudioPlayer(true);
-      // 标记用户已手动操作播放器
-      audioPlayerManuallyToggled.current = true;
-      setIsPlaying(true);
+      // 使用全局状态的playAudio方法播放音频
       playAudio(audioFiles[index]);
     }
   };
@@ -1125,35 +1111,6 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
     if (audioFiles.length === 0 || currentAudioIndex <= 0) return;
     playAudioFile(currentAudioIndex - 1);
   };
-
-  const togglePlayPause = () => {
-    if (audioPlayerRef.current) {
-      if (isPlaying) {
-        audioPlayerRef.current.audio.current?.pause();
-      } else {
-        audioPlayerRef.current.audio.current?.play();
-      }
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  const changePlaybackRate = (rate: number) => {
-    if (audioPlayerRef.current && audioPlayerRef.current.audio.current) {
-      audioPlayerRef.current.audio.current.playbackRate = rate;
-      setPlaybackRate(rate);
-    }
-  };
-
-  // 响应式设计 - 根据设备设置初始缩放级别
-  useEffect(() => {
-    if (isMobile) {
-      setScale(0.8);
-    } else if (isTablet) {
-      setScale(1.0);
-    } else {
-      setScale(1.2);
-    }
-  }, [isMobile, isTablet]);
 
   // 计算Canvas尺寸
   useEffect(() => {
@@ -1601,7 +1558,7 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
             >
               <Music className="h-3 w-3" />
               <span className="sr-only">
-                {showAudioPlayer ? '隐藏音频' : '显示音频'}
+                {currentAudioFile ? '停止音频' : '播放音频'}
               </span>
             </Button>
           )}
@@ -1819,14 +1776,9 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
         </Button>
       )}
 
-      {/* 音频播放器 - 使用悬浮播放器组件 */}
-      {showAudioPlayer && audioFiles.length > 0 && (
-        <AudioPlayerClient />
-      )}
-
       {/* PDF 查看器 - 始终使用滚动模式 */}
       <div
-        className={`${nightMode ? 'night-mode' : ''} h-full w-full pt-8 ${showAudioPlayer ? 'pb-16' : ''}`}
+        className={`${nightMode ? 'night-mode' : ''} h-full w-full pt-8 ${currentAudioFile ? 'pb-16' : ''}`}
         onClick={() => currentTool === 'none' && showToolbar === false ? setShowToolbar(true) : null}
       >
         {/* 初始加载状态 - 现在由 PdfViewerClient 内部处理 */}
@@ -1945,7 +1897,7 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
           ref={scrollAreaRef}
           className="h-full w-full overflow-y-auto"
           style={{
-            height: `calc(100vh - ${showAudioPlayer ? '64px' : '0px'})`
+            height: `calc(100vh - ${currentAudioFile ? '64px' : '0px'})`
           }}
         >
           <div className="flex justify-center w-full px-2 md:px-4">
