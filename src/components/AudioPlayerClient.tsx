@@ -19,11 +19,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { motion, AnimatePresence } from 'framer-motion';
+import { useToast } from '@/components/ui/use-toast';
 
 export function AudioPlayerClient() {
-  const { currentAudioFile, directoryContent } = useFileContext();
+  const { currentAudioFile, directoryContent, playAudio } = useFileContext();
+  const { toast } = useToast();
   const [audioFiles, setAudioFiles] = useState<any[]>([]);
-  const [currentAudioIndex, setCurrentAudioIndex] = useState<number>(0);
+  const [currentAudioIndex, setCurrentAudioIndex] = useState<number>(-1);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -34,133 +36,213 @@ export function AudioPlayerClient() {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isVolumeSliderVisible, setIsVolumeSliderVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isPlayerVisible, setIsPlayerVisible] = useState(false);
 
-  // 当选择的MP3文件变化时
   useEffect(() => {
-    if (currentAudioFile && audioRef.current) {
-      // 重置音频状态
+    if (currentAudioFile) {
+      setIsPlayerVisible(true);
+    } else {
+      setIsPlayerVisible(false);
       setIsPlaying(false);
-      setCurrentTime(0);
-      setDuration(0);
-      setIsLoading(true);
-
-      // 预载音频
-      audioRef.current.load();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
     }
   }, [currentAudioFile]);
 
-  // 当当前目录内容变化时，提取所有 MP3 文件
+  useEffect(() => {
+    if (isPlayerVisible && currentAudioFile && audioRef.current) {
+      console.log('AudioPlayerClient: currentAudioFile changed', currentAudioFile);
+      setIsLoading(true);
+      setCurrentTime(0);
+      setDuration(0);
+
+      const audioSrc = `/content/${currentAudioFile.path}`;
+      if (audioRef.current.src !== audioSrc) {
+        audioRef.current.src = audioSrc;
+        audioRef.current.load();
+        console.log('AudioPlayerClient: Loading new audio source:', audioSrc);
+      } else {
+        setIsLoading(false);
+      }
+
+      const index = audioFiles.findIndex(file => file.path === currentAudioFile.path);
+      if (index !== -1) {
+        setCurrentAudioIndex(index);
+      } else {
+        setCurrentAudioIndex(-1);
+      }
+    } else if (!currentAudioFile && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+      setIsLoading(false);
+      setIsPlaying(false);
+      setCurrentTime(0);
+      setDuration(0);
+      setCurrentAudioIndex(-1);
+    }
+  }, [isPlayerVisible, currentAudioFile, audioFiles]);
+
   useEffect(() => {
     if (directoryContent) {
       const mp3Files = directoryContent.items
         .filter(item => !item.isDirectory && item.type === 'mp3');
       setAudioFiles(mp3Files);
-
-      // 如果有当前音频文件，找到它的索引
-      if (currentAudioFile) {
-        const index = mp3Files.findIndex(file => file.path === currentAudioFile.path);
-        if (index !== -1) {
-          setCurrentAudioIndex(index);
-        }
+      console.log('AudioPlayerClient: Updated audio files list', mp3Files);
+      if (currentAudioFile && !mp3Files.some(f => f.path === currentAudioFile.path)) {
+        console.warn('AudioPlayerClient: Current audio file not found in updated list.');
       }
     }
   }, [directoryContent, currentAudioFile]);
 
-  // 音频事件处理器
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
     const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
+      if (!isNaN(audio.currentTime)) {
+        setCurrentTime(audio.currentTime);
+      }
     };
 
     const handleLoadedData = () => {
-      setDuration(audio.duration);
-      setIsLoading(false);
-      if (isPlaying) audio.play().catch(err => console.error('播放失败:', err));
+      if (!isNaN(audio.duration) && isFinite(audio.duration)) {
+        console.log('AudioPlayerClient: Audio loaded data. Duration:', audio.duration);
+        setDuration(audio.duration);
+        setIsLoading(false);
+        if (isPlaying) {
+          audio.play().catch(err => {
+            console.error('AudioPlayerClient: Playback failed after loadeddata:', err);
+            setIsPlaying(false);
+          });
+        }
+      } else {
+        console.warn('AudioPlayerClient: Loaded data but duration is invalid:', audio.duration);
+        setIsLoading(false);
+      }
     };
 
     const handleEnded = () => {
+      console.log('AudioPlayerClient: Audio ended.');
       setIsPlaying(false);
-      setCurrentTime(audio.duration);
-
-      // 如果有下一首，自动播放
-      if (currentAudioIndex < audioFiles.length - 1) {
+      setCurrentTime(duration);
+      if (currentAudioIndex !== -1 && currentAudioIndex < audioFiles.length - 1) {
         playNext();
+      } else {
+        console.log('AudioPlayerClient: Reached end of playlist.');
       }
     };
 
     const handleLoadingStart = () => {
+      console.log('AudioPlayerClient: Loading audio started.');
       setIsLoading(true);
     };
 
-    const handleError = (e: Event) => {
-      console.error('音频加载错误:', e);
+    const handleWaiting = () => {
+      console.log('AudioPlayerClient: Audio waiting for data (buffering).');
+      setIsLoading(true);
+    };
+
+    const handlePlaying = () => {
+      console.log('AudioPlayerClient: Audio playing.');
       setIsLoading(false);
+      setIsPlaying(true);
+    };
+
+    const handleCanPlay = () => {
+      console.log('AudioPlayerClient: Audio can play.');
+      setIsLoading(false);
+    };
+
+    const handleError = (e: Event) => {
+      console.error('AudioPlayerClient: Audio loading error:', e, audio?.error);
+      setIsLoading(false);
+      setIsPlaying(false);
+      setDuration(0);
+      setCurrentTime(0);
+      toast({
+        title: "音频加载错误",
+        description: `无法加载音频文件: ${audio?.error?.message || '未知错误'}`,
+        variant: "destructive",
+      });
     };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('loadeddata', handleLoadedData);
     audio.addEventListener('loadstart', handleLoadingStart);
     audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('waiting', handleWaiting);
+    audio.addEventListener('playing', handlePlaying);
+    audio.addEventListener('canplay', handleCanPlay);
     audio.addEventListener('error', handleError);
+
+    audio.volume = isMuted ? 0 : volume;
+    audio.playbackRate = playbackRate;
 
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('loadeddata', handleLoadedData);
       audio.removeEventListener('loadstart', handleLoadingStart);
       audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('waiting', handleWaiting);
+      audio.removeEventListener('playing', handlePlaying);
+      audio.removeEventListener('canplay', handleCanPlay);
       audio.removeEventListener('error', handleError);
     };
-  }, [currentAudioIndex, audioFiles.length, isPlaying]);
+  }, [isPlaying, isMuted, volume, playbackRate, currentAudioIndex, audioFiles, toast, duration]);
 
   const handlePlayPause = () => {
-    if (!audioRef.current) return;
+    if (!audioRef.current || !currentAudioFile) {
+      console.warn('AudioPlayerClient: Play/Pause attempted without audio element or file.');
+      return;
+    }
 
     if (isPlaying) {
       audioRef.current.pause();
+      setIsPlaying(false);
+      console.log('AudioPlayerClient: Paused manually.');
     } else {
-      audioRef.current.play().catch(err => console.error('播放失败:', err));
+      audioRef.current.play().then(() => {
+        console.log('AudioPlayerClient: Playing manually.');
+        setIsPlaying(true);
+      }).catch(err => {
+        console.error('AudioPlayerClient: Manual play failed:', err);
+        setIsLoading(false);
+        setIsPlaying(false);
+        toast({ title: "播放失败", description: "浏览器可能阻止了自动播放，请再次尝试。", variant: "destructive" });
+      });
     }
-    setIsPlaying(!isPlaying);
   };
 
   const handleSeek = (value: number[]) => {
-    if (!audioRef.current) return;
+    if (!audioRef.current || isNaN(value[0])) return;
     const newTime = value[0];
-    audioRef.current.currentTime = newTime;
-    setCurrentTime(newTime);
+    if (duration > 0) {
+      audioRef.current.currentTime = Math.min(newTime, duration);
+      setCurrentTime(Math.min(newTime, duration));
+    } else {
+      console.warn('AudioPlayerClient: Seek attempted before duration is known.');
+    }
   };
 
   const handleVolumeChange = (value: number[]) => {
-    if (!audioRef.current) return;
+    if (!audioRef.current || isNaN(value[0])) return;
     const newVolume = value[0];
     audioRef.current.volume = newVolume;
     setVolume(newVolume);
-
-    if (newVolume === 0) {
-      setIsMuted(true);
-    } else if (isMuted) {
-      setIsMuted(false);
-    }
+    setIsMuted(newVolume === 0);
   };
 
   const toggleMute = () => {
     if (!audioRef.current) return;
-
-    if (isMuted) {
-      audioRef.current.volume = volume;
-      setIsMuted(false);
-    } else {
-      audioRef.current.volume = 0;
-      setIsMuted(true);
-    }
+    const currentlyMuted = !isMuted;
+    audioRef.current.volume = currentlyMuted ? 0 : volume;
+    setIsMuted(currentlyMuted);
   };
 
   const skipForward = () => {
-    if (!audioRef.current) return;
-    // 前进10秒
+    if (!audioRef.current || duration === 0) return;
     const newTime = Math.min(audioRef.current.currentTime + 10, duration);
     audioRef.current.currentTime = newTime;
     setCurrentTime(newTime);
@@ -168,7 +250,6 @@ export function AudioPlayerClient() {
 
   const skipBackward = () => {
     if (!audioRef.current) return;
-    // 后退10秒
     const newTime = Math.max(audioRef.current.currentTime - 10, 0);
     audioRef.current.currentTime = newTime;
     setCurrentTime(newTime);
@@ -177,8 +258,10 @@ export function AudioPlayerClient() {
   const changePlaybackRate = (rate: string) => {
     if (!audioRef.current) return;
     const newRate = parseFloat(rate);
-    audioRef.current.playbackRate = newRate;
-    setPlaybackRate(newRate);
+    if (!isNaN(newRate)) {
+      audioRef.current.playbackRate = newRate;
+      setPlaybackRate(newRate);
+    }
   };
 
   const toggleMinimize = () => {
@@ -188,93 +271,106 @@ export function AudioPlayerClient() {
 
   const playNext = () => {
     if (audioFiles.length === 0 || currentAudioIndex >= audioFiles.length - 1) return;
-    setCurrentAudioIndex(currentAudioIndex + 1);
-    setIsPlaying(true);
+    const nextIndex = currentAudioIndex + 1;
+    if (audioFiles[nextIndex]) {
+      playAudio(audioFiles[nextIndex]);
+      setIsPlaying(true);
+      console.log('AudioPlayerClient: Playing next audio.');
+    } else {
+      console.warn('AudioPlayerClient: Next audio file not found at index:', nextIndex);
+    }
   };
 
   const playPrevious = () => {
     if (audioFiles.length === 0 || currentAudioIndex <= 0) return;
-    setCurrentAudioIndex(currentAudioIndex - 1);
-    setIsPlaying(true);
+    const prevIndex = currentAudioIndex - 1;
+    if (audioFiles[prevIndex]) {
+      playAudio(audioFiles[prevIndex]);
+      setIsPlaying(true);
+      console.log('AudioPlayerClient: Playing previous audio.');
+    } else {
+      console.warn('AudioPlayerClient: Previous audio file not found at index:', prevIndex);
+    }
   };
 
-  // 格式化时间显示
   const formatTime = (timeInSeconds: number) => {
-    if (!timeInSeconds) return "00:00";
+    if (isNaN(timeInSeconds) || timeInSeconds < 0) return "00:00";
     const minutes = Math.floor(timeInSeconds / 60);
     const seconds = Math.floor(timeInSeconds % 60);
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   };
 
-  // 如果没有当前音频文件且没有可用音频文件，不显示播放器
-  if ((!currentAudioFile && audioFiles.length === 0) || audioFiles.length === 0) {
+  if (!isPlayerVisible) {
     return null;
   }
 
-  // 更新音频URL和文件名
-  const audioFile = currentAudioFile || audioFiles[currentAudioIndex];
-  const audioUrl = audioFile ? `/content/${audioFile.path}` : '';
-  const fileName = audioFile ? audioFile.name : '';
+  const fileName = currentAudioFile ? currentAudioFile.name : '加载中...';
+  const displayIndex = currentAudioIndex !== -1 ? currentAudioIndex + 1 : '-';
 
   return (
     <AnimatePresence>
       <motion.div
-        initial={{ y: 20, opacity: 0 }}
+        initial={{ y: 100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 20, opacity: 0 }}
-        transition={{ duration: 0.3 }}
+        exit={{ y: 100, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 100, damping: 20 }}
         className="fixed bottom-4 right-4 z-50"
       >
         <Card
-          className={`shadow-xl border border-gray-200 dark:border-gray-800 ${isMinimized ? 'w-16 h-16 rounded-full' : 'w-80 rounded-lg'
+          className={`shadow-xl border border-border/20 dark:border-border/10 backdrop-blur-md bg-background/80 dark:bg-background/70 ${isMinimized ? 'w-16 h-16 rounded-full cursor-pointer' : 'w-80 rounded-lg'
             } transition-all duration-300 ease-in-out overflow-hidden`}
+          onClick={isMinimized ? toggleMinimize : undefined}
         >
           {isMinimized ? (
             <motion.div
-              className="h-full flex items-center justify-center bg-black text-white rounded-full"
+              className="h-full flex items-center justify-center rounded-full"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-white h-full w-full rounded-full"
-                onClick={toggleMinimize}
-              >
-                <Music className="h-6 w-6 animate-pulse" />
-              </Button>
+              {isLoading ? (
+                <Loader2 className="h-6 w-6 text-primary animate-spin" />
+              ) : (
+                <Music className="h-6 w-6 text-primary" />
+              )}
             </motion.div>
           ) : (
-            <div className="p-4 bg-white dark:bg-black">
+            <div className="p-4">
               <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
                     {isLoading ? (
-                      <Loader2 className="h-4 w-4 text-black dark:text-white animate-spin" />
+                      <Loader2 className="h-4 w-4 text-primary animate-spin" />
                     ) : isPlaying ? (
-                      <Music className="h-4 w-4 text-black dark:text-white animate-bounce" />
+                      <motion.div
+                        animate={{
+                          scale: [1, 1.2, 1],
+                          transition: { duration: 0.5, repeat: Infinity }
+                        }}
+                      >
+                        <Music className="h-4 w-4 text-primary" />
+                      </motion.div>
                     ) : (
-                      <Music className="h-4 w-4 text-black dark:text-white" />
+                      <Music className="h-4 w-4 text-muted-foreground" />
                     )}
                   </div>
-                  <div className="max-w-[180px] overflow-hidden">
-                    <h3 className="text-sm font-medium truncate text-black dark:text-white">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-medium truncate text-foreground">
                       {fileName}
                     </h3>
                     {audioFiles.length > 1 && (
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {currentAudioIndex + 1} / {audioFiles.length}
+                      <p className="text-xs text-muted-foreground">
+                        {displayIndex} / {audioFiles.length}
                       </p>
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        className="h-7 w-12 text-xs px-1 rounded-full border-gray-200 dark:border-gray-800"
+                        className="h-7 w-12 text-xs px-1 rounded-full border border-border/50 hover:bg-muted/50"
                       >
                         {playbackRate}x
                       </Button>
@@ -299,10 +395,10 @@ export function AudioPlayerClient() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 h-7 w-7"
+                    className="rounded-full hover:bg-muted/50 h-7 w-7"
                     onClick={toggleMinimize}
                   >
-                    <X className="h-4 w-4 text-black dark:text-white" />
+                    <X className="h-4 w-4 text-muted-foreground" />
                   </Button>
                 </div>
               </div>
@@ -311,41 +407,40 @@ export function AudioPlayerClient() {
                 <Slider
                   value={[currentTime]}
                   min={0}
-                  max={duration || 100}
+                  max={duration || 1}
                   step={0.1}
                   onValueChange={handleSeek}
-                  className="h-1.5"
-                  disabled={isLoading}
+                  className="h-1.5 cursor-pointer"
+                  disabled={isLoading || duration === 0}
                 />
-                <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                <div className="flex justify-between text-xs text-muted-foreground mt-1.5">
                   <span>{formatTime(currentTime)}</span>
                   <span>{formatTime(duration)}</span>
                 </div>
               </div>
 
-              {/* 主要控制区域 */}
               <div className="flex justify-center items-center mb-4">
                 <div className="flex items-center space-x-4">
                   {audioFiles.length > 1 && (
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="icon"
                       onClick={playPrevious}
                       disabled={currentAudioIndex <= 0 || isLoading}
-                      className="rounded-full h-8 w-8 border-gray-200 dark:border-gray-800 bg-white dark:bg-black hover:bg-gray-100 dark:hover:bg-gray-800"
+                      className="rounded-full h-8 w-8 hover:bg-muted/50"
                     >
-                      <SkipBack className="h-4 w-4 text-gray-700 dark:text-gray-300" />
+                      <SkipBack className="h-4 w-4 text-foreground" />
                     </Button>
                   )}
 
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon"
                     onClick={skipBackward}
-                    disabled={isLoading}
-                    className="rounded-full h-8 w-8 border-gray-200 dark:border-gray-800 bg-white dark:bg-black hover:bg-gray-100 dark:hover:bg-gray-800"
+                    disabled={isLoading || duration === 0}
+                    className="rounded-full h-8 w-8 hover:bg-muted/50"
                   >
-                    <Rewind className="h-4 w-4 text-gray-700 dark:text-gray-300" />
+                    <Rewind className="h-4 w-4 text-foreground" />
                   </Button>
 
                   <Button
@@ -353,36 +448,36 @@ export function AudioPlayerClient() {
                     size="icon"
                     onClick={handlePlayPause}
                     disabled={isLoading}
-                    className="rounded-full h-10 w-10 border-gray-300 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-white dark:from-gray-900 dark:to-black hover:from-white hover:to-gray-50 dark:hover:from-black dark:hover:to-gray-900"
+                    className="rounded-full h-10 w-10 border-border/50 bg-background hover:bg-muted/50"
                   >
                     {isLoading ? (
-                      <Loader2 className="h-5 w-5 text-gray-800 dark:text-gray-200 animate-spin" />
+                      <Loader2 className="h-5 w-5 text-primary animate-spin" />
                     ) : isPlaying ? (
-                      <Pause className="h-5 w-5 text-gray-800 dark:text-gray-200" />
+                      <Pause className="h-5 w-5 text-primary" />
                     ) : (
-                      <Play className="h-5 w-5 text-gray-800 dark:text-gray-200 ml-0.5" />
+                      <Play className="h-5 w-5 text-primary ml-0.5" />
                     )}
                   </Button>
 
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon"
                     onClick={skipForward}
-                    disabled={isLoading}
-                    className="rounded-full h-8 w-8 border-gray-200 dark:border-gray-800 bg-white dark:bg-black hover:bg-gray-100 dark:hover:bg-gray-800"
+                    disabled={isLoading || duration === 0}
+                    className="rounded-full h-8 w-8 hover:bg-muted/50"
                   >
-                    <FastForward className="h-4 w-4 text-gray-700 dark:text-gray-300" />
+                    <FastForward className="h-4 w-4 text-foreground" />
                   </Button>
 
                   {audioFiles.length > 1 && (
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="icon"
                       onClick={playNext}
-                      disabled={currentAudioIndex >= audioFiles.length - 1 || isLoading}
-                      className="rounded-full h-8 w-8 border-gray-200 dark:border-gray-800 bg-white dark:bg-black hover:bg-gray-100 dark:hover:bg-gray-800"
+                      disabled={currentAudioIndex === -1 || currentAudioIndex >= audioFiles.length - 1 || isLoading}
+                      className="rounded-full h-8 w-8 hover:bg-muted/50"
                     >
-                      <SkipForward className="h-4 w-4 text-gray-700 dark:text-gray-300" />
+                      <SkipForward className="h-4 w-4 text-foreground" />
                     </Button>
                   )}
                 </div>
@@ -390,13 +485,13 @@ export function AudioPlayerClient() {
 
               <div className="flex items-center justify-between space-x-3">
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="icon"
                   onClick={toggleMute}
                   disabled={isLoading}
-                  className="rounded-full h-7 w-7 border-gray-200 dark:border-gray-800"
+                  className="rounded-full h-7 w-7 hover:bg-muted/50"
                 >
-                  {isMuted ? <VolumeX className="h-3.5 w-3.5 text-gray-700 dark:text-gray-300" /> : <Volume2 className="h-3.5 w-3.5 text-gray-700 dark:text-gray-300" />}
+                  {isMuted ? <VolumeX className="h-3.5 w-3.5 text-muted-foreground" /> : <Volume2 className="h-3.5 w-3.5 text-muted-foreground" />}
                 </Button>
 
                 <Slider
@@ -405,11 +500,11 @@ export function AudioPlayerClient() {
                   max={1}
                   step={0.01}
                   onValueChange={handleVolumeChange}
-                  className="h-1.5 flex-1"
+                  className="h-1.5 flex-1 cursor-pointer"
                   disabled={isLoading}
                 />
 
-                <div className="text-xs text-gray-500 dark:text-gray-400 w-8 text-right">
+                <div className="text-xs text-muted-foreground w-8 text-right">
                   {Math.round((isMuted ? 0 : volume) * 100)}%
                 </div>
               </div>
@@ -418,7 +513,6 @@ export function AudioPlayerClient() {
         </Card>
         <audio
           ref={audioRef}
-          src={audioUrl}
           preload="metadata"
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}

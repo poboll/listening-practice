@@ -9,7 +9,7 @@ import {
   ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCw, RotateCcw,
   Maximize2, Minimize2, Moon, Sun, Highlighter, Pencil, Pen,
   Eraser, FileText, X, Trash2, ArrowLeft, Music, MoreHorizontal,
-  Loader2, Eye, EyeOff
+  Loader2, Eye, EyeOff, Database
 } from 'lucide-react';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AudioPlayerClient } from "@/components/AudioPlayerClient";
+import { usePdfCache } from '@/hooks/usePdfCache';
 
 // 设置PDF.js worker路径
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
@@ -139,11 +140,17 @@ const LazyPage = ({ pageNumber, scale, rotation, onPageLoadSuccess }: LazyPagePr
   );
 };
 
-export function PdfViewerClient() {
+interface PdfViewerClientProps {
+  isHighPerformance: boolean | null;
+}
+
+// 添加 Props 定义并解构
+export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
   const router = useRouter();
   const { selectedPdfFile, setSelectedFile, directoryContent, playAudio } = useFileContext();
   const { updateReadingProgress, exitReading } = useReadingProgress();
   const { toast } = useToast();
+  const { cacheExists, saveToCache, getFromCache, clearCache } = usePdfCache();
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState<number>(1);
   const [visiblePages, setVisiblePages] = useState<number[]>([]);
@@ -169,9 +176,16 @@ export function PdfViewerClient() {
   const [showExitButton, setShowExitButton] = useState<boolean>(true);
   const [lazyLoadThreshold, setLazyLoadThreshold] = useState<number>(5);
   const [isLazyLoading, setIsLazyLoading] = useState<boolean>(true);
-  // 新增状态：记录加载尝试次数
   const [loadAttempts, setLoadAttempts] = useState<number>(0);
   const [workerLoaded, setWorkerLoaded] = useState<boolean>(false);
+  const [isPageVisible, setIsPageVisible] = useState<boolean>(true);
+  const [documentLoaded, setDocumentLoaded] = useState<boolean>(false);
+  const [fromCache, setFromCache] = useState<boolean>(false);
+  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
+  const [autoLoadAllPages, setAutoLoadAllPages] = useState<boolean>(false);
+  const [isScrolling, setIsScrolling] = useState<boolean>(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [cachingEnabled, setCachingEnabled] = useState<boolean>(true);
 
   // 新增的状态变量
   const [showPageTurnIndicator, setShowPageTurnIndicator] = useState<'prev' | 'next' | null>(null);
@@ -179,7 +193,6 @@ export function PdfViewerClient() {
   const [scrollMode, setScrollMode] = useState<boolean>(true);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  // 用于跟踪音频播放器是否被手动切换过
   const audioPlayerManuallyToggled = useRef<boolean>(false);
 
   // 音频播放相关状态
@@ -236,6 +249,8 @@ export function PdfViewerClient() {
       setWorkerLoaded(false);
       // 重置音频播放器手动切换标志
       audioPlayerManuallyToggled.current = false;
+      // 重置文档加载状态
+      setDocumentLoaded(false);
 
       // 清除之前可能存在的提示定时器
       if (timeoutRef.current) {
@@ -377,25 +392,223 @@ export function PdfViewerClient() {
     }
   };
 
-  // 处理文档加载成功
+  // 添加自动全部加载检测函数 - 使用传入的 isHighPerformance
+  useEffect(() => {
+    const checkAutoLoadAllPages = () => {
+      // 使用传入的 isHighPerformance
+      const highPerformanceDevice = isHighPerformance ?? false;
+
+      // 检查网络状况
+      const connection = (navigator as any).connection ||
+        (navigator as any).mozConnection ||
+        (navigator as any).webkitConnection;
+
+      let fastNetwork = true;
+      if (connection) {
+        // 检测网络类型和速度
+        const netType = connection.type;
+        const effectiveType = connection.effectiveType;
+
+        // 慢网络条件: 2g或速度较慢的网络
+        fastNetwork = !(netType === 'cellular' &&
+          (effectiveType === 'slow-2g' || effectiveType === '2g'));
+      }
+
+      // 如果是高性能设备且网络良好，则自动加载所有页面
+      if (highPerformanceDevice && fastNetwork) {
+        setAutoLoadAllPages(true);
+      } else {
+        setAutoLoadAllPages(false);
+      }
+    };
+
+    checkAutoLoadAllPages();
+    // 更新依赖项
+  }, [isMobile, isHighPerformance]);
+
+  // 修改PDF缓存实现
+  useEffect(() => {
+    // 如果选择了PDF文件且启用了缓存
+    if (selectedPdfFile && cachingEnabled) {
+      const pdfUrl = `/content/${selectedPdfFile.path}`;
+      const cacheKey = selectedPdfFile.path;
+
+      // 先检查是否有缓存
+      const checkCache = async () => {
+        try {
+          const exists = await cacheExists(cacheKey);
+          if (exists) {
+            try {
+              const cachedData = await getFromCache(cacheKey);
+              if (cachedData) {
+                setPdfData(cachedData);
+                setFromCache(true);
+                toast({
+                  title: "使用缓存版本",
+                  description: "已从缓存加载文档，加载速度更快",
+                  duration: 2000,
+                });
+              } else {
+                // 缓存数据获取失败，从网络加载
+                setPdfData(null);
+                setFromCache(false);
+                fetchAndCachePdf(pdfUrl, cacheKey);
+              }
+            } catch (error) {
+              console.error('获取缓存数据失败:', error);
+              setPdfData(null);
+              setFromCache(false);
+              fetchAndCachePdf(pdfUrl, cacheKey);
+            }
+          } else {
+            // 没有缓存，从网络加载
+            setPdfData(null);
+            setFromCache(false);
+            fetchAndCachePdf(pdfUrl, cacheKey);
+          }
+        } catch (error) {
+          console.error('检查缓存失败:', error);
+          setPdfData(null);
+          setFromCache(false);
+        }
+      };
+
+      checkCache();
+    } else {
+      setPdfData(null);
+      setFromCache(false);
+    }
+  }, [selectedPdfFile, cachingEnabled]);
+
+  // 添加获取并缓存PDF的函数
+  const fetchAndCachePdf = async (pdfUrl: string, cacheKey: string) => {
+    try {
+      // 显示加载状态
+      setLoading(true);
+
+      // 获取PDF文件
+      const response = await fetch(pdfUrl);
+
+      // 检查响应状态
+      if (!response.ok) {
+        throw new Error(`网络请求失败: ${response.status}`);
+      }
+
+      // 获取ArrayBuffer
+      const arrayBuffer = await response.arrayBuffer();
+
+      // 设置PDF数据
+      setPdfData(arrayBuffer);
+
+      // 缓存PDF数据
+      saveToCache(cacheKey, arrayBuffer)
+        .then(() => {
+          console.log('PDF已成功缓存');
+        })
+        .catch(error => {
+          console.error('缓存PDF时出错:', error);
+        });
+
+    } catch (error) {
+      console.error('获取PDF时出错:', error);
+      setError(`加载PDF失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      setLoading(false);
+    }
+  };
+
+  // 处理滚动结束检测 - 在滚动停止时加载更多页面
+  useEffect(() => {
+    // 只有在懒加载模式下启用
+    if (!isLazyLoading || !scrollAreaRef.current) return;
+
+    const handleScroll = () => {
+      setIsScrolling(true);
+
+      // 清除之前的超时
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+
+      // 设置新的超时 - 滚动停止500ms后触发
+      scrollTimeoutRef.current = setTimeout(() => {
+        setIsScrolling(false);
+        // 滚动结束后检查是否需要加载更多页面
+        checkNeedLoadMorePages();
+      }, 500);
+    };
+
+    const scrollArea = scrollAreaRef.current;
+    scrollArea.addEventListener('scroll', handleScroll);
+
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      scrollArea.removeEventListener('scroll', handleScroll);
+    };
+  }, [isLazyLoading, numPages, loadedPages]);
+
+  // 检查是否需要加载更多页面
+  const checkNeedLoadMorePages = useCallback(() => {
+    if (!numPages || !scrollAreaRef.current) return;
+
+    const scrollArea = scrollAreaRef.current;
+    const scrollPosition = scrollArea.scrollTop;
+    const clientHeight = scrollArea.clientHeight;
+    const scrollHeight = scrollArea.scrollHeight;
+
+    // 已滚动到内容的90%位置
+    const scrollThreshold = 0.9;
+    const scrollPercentage = (scrollPosition + clientHeight) / scrollHeight;
+
+    if (scrollPercentage > scrollThreshold) {
+      const currentLastPage = Math.max(...Array.from(loadedPages));
+      const maxPageToLoad = Math.min(numPages, currentLastPage + lazyLoadThreshold);
+
+      if (maxPageToLoad > currentLastPage) {
+        // 明确 pagesToAdd 的类型为 number[]
+        const pagesToAdd: number[] = [];
+        for (let i = currentLastPage + 1; i <= maxPageToLoad; i++) {
+          if (!loadedPages.has(i)) {
+            pagesToAdd.push(i);
+          }
+        }
+
+        if (pagesToAdd.length > 0) {
+          setVisiblePages(prev => [...new Set([...prev, ...pagesToAdd])]);
+        }
+      }
+    }
+  }, [numPages, loadedPages, lazyLoadThreshold]);
+
+  // 优化处理文档加载成功函数
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
     setLoading(false);
     setInitialLoad(false);
-    setError(null); // 清除可能存在的错误状态
+    setError(null);
+    setDocumentLoaded(true);
 
     // 加载成功后重置尝试次数
     setLoadAttempts(0);
 
     // 初始化可见页面数组
     if (pageNumber > 0 && pageNumber <= numPages) {
-      // 移动设备上减少同时加载的页数，提高性能
-      const visibleThreshold = isMobile ? 2 : isTablet ? 3 : lazyLoadThreshold;
-      const visiblePagesArray = [];
-      for (let i = pageNumber; i < pageNumber + visibleThreshold && i <= numPages; i++) {
-        visiblePagesArray.push(i);
+      // 如果已经设置了自动加载所有页面或来自缓存，则一次性加载所有页面
+      if (autoLoadAllPages || fromCache) {
+        const allPages = Array.from({ length: numPages }, (_, i) => i + 1);
+        setVisiblePages(allPages);
+        setIsLazyLoading(false);
+        console.log(`自动加载所有${numPages}页 - ${autoLoadAllPages ? '高性能设备' : '缓存加速'}`);
+      } else {
+        // 否则使用懒加载方式
+        const visibleThreshold = isMobile ? 3 : isTablet ? 5 : lazyLoadThreshold + 2;
+        const visiblePagesArray = [];
+        for (let i = pageNumber; i < pageNumber + visibleThreshold && i <= numPages; i++) {
+          visiblePagesArray.push(i);
+        }
+        setVisiblePages(visiblePagesArray);
       }
-      setVisiblePages(visiblePagesArray);
     }
 
     // 清除加载超时计时器
@@ -413,6 +626,12 @@ export function PdfViewerClient() {
   // 处理文档加载失败
   const onDocumentLoadError = (err: Error) => {
     console.error('PDF加载错误:', err);
+
+    // 如果页面不可见，先不处理错误
+    if (!isPageVisible) {
+      console.log('页面不可见，暂不处理PDF加载错误');
+      return;
+    }
 
     // 增加加载尝试次数
     setLoadAttempts(prev => prev + 1);
@@ -440,6 +659,7 @@ export function PdfViewerClient() {
     setError(`加载PDF失败: ${err.message}`);
     setLoading(false);
     setInitialLoad(false);
+    setDocumentLoaded(false); // 标记文档加载失败
 
     toast({
       title: "PDF加载失败",
@@ -449,13 +669,190 @@ export function PdfViewerClient() {
     });
   };
 
-  // 滚动事件处理，动态加载页面
+  // 添加页面可见性监听
+  useEffect(() => {
+    // 页面可见性变化处理函数
+    const handleVisibilityChange = () => {
+      const isVisible = document.visibilityState === 'visible';
+      setIsPageVisible(isVisible);
+
+      // 当页面变为可见且PDF已经加载过但当前显示为加载中状态时
+      if (isVisible && documentLoaded && (loading || initialLoad)) {
+        console.log('页面恢复可见，重置PDF加载状态');
+
+        // 短暂延迟后重置加载状态，让UI有时间响应
+        setTimeout(() => {
+          setLoading(false);
+          setInitialLoad(false);
+
+          // 如果有错误状态也清除
+          if (error) {
+            setError(null);
+          }
+
+          // 通知用户页面已恢复
+          toast({
+            title: "阅读已恢复",
+            description: "页面已重新激活",
+            duration: 2000,
+          });
+
+          // 如果PDF确实没有正确加载，可以尝试重新渲染Document组件
+          if (numPages === null && selectedPdfFile) {
+            // 强制刷新Document组件
+            setLoadAttempts(prev => prev + 1);
+          }
+        }, 300);
+      }
+    };
+
+    // 注册页面可见性事件监听
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // 清理函数
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [documentLoaded, loading, initialLoad, error, numPages, selectedPdfFile, toast]);
+
+  // 当选择的PDF文件变化时，重置文档加载状态
+  useEffect(() => {
+    if (selectedPdfFile) {
+      // 重置状态
+      setPageNumber(1);
+      setVisiblePages([1]);
+      setLoadedPages(new Set([1]));
+      // 为移动设备优化缩放级别
+      setScale(isMobile ? 0.7 : isTablet ? 0.9 : 1.2);
+      setRotation(0);
+      setLoading(true);
+      setError(null);
+      setAnnotations([]);
+      setCurrentTool('none');
+      setInitialLoad(true);
+      setShowAudioPlayer(false);
+      setScrollMode(true);
+      // 重置加载尝试次数
+      setLoadAttempts(0);
+      setWorkerLoaded(false);
+      // 重置音频播放器手动切换标志
+      audioPlayerManuallyToggled.current = false;
+      // 重置文档加载状态
+      setDocumentLoaded(false);
+
+      // 清除之前可能存在的提示定时器
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+
+      // 清除加载超时计时器
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+
+      // 设置更灵活的加载超时机制
+      // 移动设备给更长的加载时间
+      const timeoutDuration = isMobile || isTablet ? 20000 : 10000;
+
+      loadingTimeoutRef.current = setTimeout(() => {
+        if (initialLoad || loading) {
+          setInitialLoad(false);
+          setLoading(false);
+
+          // 增加加载尝试次数
+          setLoadAttempts(prev => prev + 1);
+
+          // 如果多次尝试仍然失败，提供更明确的错误信息
+          if (loadAttempts >= 2) {
+            setError("PDF加载失败，请检查网络连接或者文件是否损坏");
+            toast({
+              title: "PDF加载失败",
+              description: "请尝试刷新页面或使用不同的浏览器",
+              variant: "destructive",
+              duration: 5000,
+            });
+          } else {
+            console.log("PDF加载超时，尝试重新加载");
+            toast({
+              title: "PDF加载较慢",
+              description: "正在尝试重新加载，请稍候...",
+              duration: 3000,
+            });
+
+            // 尝试更换worker源并重试
+            if (!workerLoaded) {
+              pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
+              setWorkerLoaded(true);
+            }
+          }
+        }
+      }, timeoutDuration);
+
+      // 尝试加载上次阅读位置
+      try {
+        const savedReadings = localStorage.getItem('pdf-reading-progress');
+        if (savedReadings) {
+          const parsedReadings = JSON.parse(savedReadings);
+          const currentFileReading = parsedReadings.find(
+            (r: any) => r.filePath === selectedPdfFile.path
+          );
+
+          if (currentFileReading && currentFileReading.currentPage) {
+            setPageNumber(currentFileReading.currentPage);
+            setVisiblePages([currentFileReading.currentPage]);
+            setLoadedPages(new Set([currentFileReading.currentPage]));
+
+            // 添加一个标志，防止重复提示
+            const hasShownToast = sessionStorage.getItem(`shown-toast-${selectedPdfFile.path}`);
+            if (!hasShownToast) {
+              toast({
+                title: "已恢复上次阅读位置",
+                description: `第${currentFileReading.currentPage}页，共${currentFileReading.totalPages}页`,
+                duration: 2000,
+              });
+              sessionStorage.setItem(`shown-toast-${selectedPdfFile.path}`, 'true');
+            }
+          }
+        }
+      } catch (error) {
+        console.error('恢复阅读位置失败:', error);
+      }
+
+      // 检测同目录下的音频文件
+      scanForRelatedAudioFiles();
+    }
+
+    // 组件卸载时清除计时器
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+    };
+  }, [selectedPdfFile, toast, isMobile, isTablet, loadAttempts]);
+
+  // 添加页面重新获得焦点时的重载逻辑
+  // 在现有的处理文档加载相关代码下添加
+  useEffect(() => {
+    // 当页面可见且文档应该已经加载但状态不对时进行处理
+    if (isPageVisible && documentLoaded && loading) {
+      // 重置加载状态
+      setLoading(false);
+    }
+  }, [isPageVisible, documentLoaded, loading]);
+
+  // 修改滚动事件处理函数，提高加载效率
   const handleScroll = useCallback(() => {
     if (!scrollAreaRef.current || !numPages || !isLazyLoading) return;
 
     const scrollArea = scrollAreaRef.current;
     const scrollTop = scrollArea.scrollTop;
     const scrollAreaHeight = scrollArea.clientHeight;
+    const scrollHeight = scrollArea.scrollHeight;
 
     // 获取所有页面元素
     const pageElements = scrollArea.querySelectorAll('.react-pdf__Page');
@@ -497,14 +894,16 @@ export function PdfViewerClient() {
       }
     }
 
-    // 检查是否需要加载更多页面
-    if (currentlyVisiblePages.length > 0) {
+    // 检查是否接近底部，需要提前加载更多页面
+    const scrollPercentage = (scrollTop + scrollAreaHeight) / scrollHeight;
+    if (scrollPercentage > 0.8 && currentlyVisiblePages.length > 0) {
       const lastVisiblePage = Math.max(...currentlyVisiblePages);
       const additionalPagesToLoad: number[] = [];
 
-      // 预加载后面的几页
+      // 预加载更多页面，提高用户体验
+      const extraPagesToLoad = isMobile ? 2 : 5; // 移动设备加载更少页面
       for (let i = lastVisiblePage + 1;
-        i <= lastVisiblePage + lazyLoadThreshold && i <= numPages;
+        i <= lastVisiblePage + extraPagesToLoad && i <= numPages;
         i++) {
         if (!loadedPages.has(i)) {
           additionalPagesToLoad.push(i);
@@ -515,7 +914,7 @@ export function PdfViewerClient() {
         setVisiblePages(prev => [...new Set([...prev, ...additionalPagesToLoad])]);
       }
     }
-  }, [numPages, pageNumber, lazyLoadThreshold, loadedPages, isLazyLoading, selectedPdfFile, updateReadingProgress]);
+  }, [numPages, pageNumber, loadedPages, isLazyLoading, selectedPdfFile, updateReadingProgress, isMobile]);
 
   // 注册滚动监听
   useEffect(() => {
@@ -563,9 +962,36 @@ export function PdfViewerClient() {
     }
   };
 
-  // 滚动到指定页面
+  // 更新页面跳转函数，确保目标页面已加载
   const scrollToPage = (pageNum: number) => {
     if (!scrollAreaRef.current || pageNum < 1 || pageNum > (numPages || 0)) return;
+
+    if (!loadedPages.has(pageNum)) {
+      // 明确 pagesToAdd 的类型为 number[]
+      const pagesToAdd: number[] = [];
+      for (let i = Math.max(1, pageNum - 2); i <= Math.min(numPages || 0, pageNum + 5); i++) {
+        if (!loadedPages.has(i)) {
+          pagesToAdd.push(i);
+        }
+      }
+
+      if (pagesToAdd.length > 0) {
+        setVisiblePages(prev => [...new Set([...prev, ...pagesToAdd])]);
+
+        setTimeout(() => {
+          scrollToTarget(pageNum);
+        }, 100);
+      } else {
+        scrollToTarget(pageNum);
+      }
+    } else {
+      scrollToTarget(pageNum);
+    }
+  };
+
+  // 抽取实际滚动到目标页面的函数
+  const scrollToTarget = (pageNum: number) => {
+    if (!scrollAreaRef.current) return;
 
     const pageElements = scrollAreaRef.current.querySelectorAll('.react-pdf__Page');
     if (pageElements.length >= pageNum) {
@@ -610,21 +1036,39 @@ export function PdfViewerClient() {
     }
   };
 
-  // 切换懒加载模式
+  // 优化切换懒加载模式函数
   const toggleLazyLoading = () => {
     if (isLazyLoading) {
       // 切换到一次性加载所有页面
-      const allPages = Array.from({ length: numPages || 0 }, (_, i) => i + 1);
-      setVisiblePages(allPages);
-      setIsLazyLoading(false);
+      if (numPages) {
+        const allPages = Array.from({ length: numPages }, (_, i) => i + 1);
+        setVisiblePages(allPages);
+        setIsLazyLoading(false);
+
+        toast({
+          title: "加载模式已更改",
+          description: "已切换到一次性加载所有页面模式",
+          duration: 2000,
+        });
+      }
     } else {
       // 切换回懒加载模式
-      const currentVisiblePages = [];
-      for (let i = pageNumber; i < pageNumber + lazyLoadThreshold && i <= (numPages || 0); i++) {
-        currentVisiblePages.push(i);
+      if (numPages && pageNumber) {
+        const visibleThreshold = isMobile ? 3 : isTablet ? 5 : lazyLoadThreshold;
+        const currentVisiblePages = [];
+        for (let i = Math.max(1, pageNumber - 1);
+          i < pageNumber + visibleThreshold && i <= numPages; i++) {
+          currentVisiblePages.push(i);
+        }
+        setVisiblePages(currentVisiblePages);
+        setIsLazyLoading(true);
+
+        toast({
+          title: "加载模式已更改",
+          description: "已切换到渐进式加载模式",
+          duration: 2000,
+        });
       }
-      setVisiblePages(currentVisiblePages);
-      setIsLazyLoading(true);
     }
   };
 
@@ -1056,6 +1500,53 @@ export function PdfViewerClient() {
     };
   }, [optimizeForScreenSize]);
 
+  // 添加缓存控制功能
+  const toggleCaching = () => {
+    setCachingEnabled(!cachingEnabled);
+
+    toast({
+      title: cachingEnabled ? "已禁用PDF缓存" : "已启用PDF缓存",
+      description: cachingEnabled ?
+        "PDF将不再被缓存，可能会增加加载时间" :
+        "PDF将被缓存以加快加载速度",
+      duration: 2000,
+    });
+  };
+
+  // 清除指定PDF缓存
+  const clearCurrentPdfCache = () => {
+    if (selectedPdfFile) {
+      clearCache(selectedPdfFile.path)
+        .then(() => {
+          toast({
+            title: "缓存已清除",
+            description: "当前PDF的缓存已成功清除",
+            duration: 2000,
+          });
+        })
+        .catch(error => {
+          console.error('清除缓存失败:', error);
+          toast({
+            title: "清除缓存失败",
+            description: "无法清除PDF缓存，请稍后再试",
+            variant: "destructive",
+            duration: 3000,
+          });
+        });
+    }
+  };
+
+  if (isHighPerformance === null) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center space-y-2">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">正在检测设备性能...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!selectedPdfFile) {
     return (
       <div className="h-full flex flex-col items-center justify-center acrylic quantum-dot">
@@ -1123,10 +1614,10 @@ export function PdfViewerClient() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem onClick={toggleNightMode} className="text-xs">
-                {nightMode ? '日间模式' : '夜间模式'}
+                {nightMode ? <><Sun className="h-3 w-3 mr-1" /> 日间模式</> : <><Moon className="h-3 w-3 mr-1" /> 夜间模式</>}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={toggleFullScreen} className="text-xs">
-                {isFullscreen ? '退出全屏' : '全屏模式'}
+                {isFullscreen ? <><Minimize2 className="h-3 w-3 mr-1" /> 退出全屏</> : <><Maximize2 className="h-3 w-3 mr-1" /> 全屏模式</>}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setShowToolbar(!showToolbar)} className="text-xs">
                 {showToolbar ? '隐藏工具栏' : '显示工具栏'}
@@ -1138,6 +1629,19 @@ export function PdfViewerClient() {
                   <><EyeOff className="h-3 w-3 mr-1" /> 恢复渐进式加载</>
                 )}
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={toggleCaching} className="text-xs">
+                {cachingEnabled ? (
+                  <><Database className="h-3 w-3 mr-1" /> 禁用PDF缓存</>
+                ) : (
+                  <><Database className="h-3 w-3 mr-1" /> 启用PDF缓存</>
+                )}
+              </DropdownMenuItem>
+              {fromCache && (
+                <DropdownMenuItem onClick={clearCurrentPdfCache} className="text-xs text-destructive">
+                  <Trash2 className="h-3 w-3 mr-1" /> 清除当前PDF缓存
+                </DropdownMenuItem>
+              )}
               {currentTool !== 'none' && (
                 <>
                   <DropdownMenuSeparator />
@@ -1325,7 +1829,7 @@ export function PdfViewerClient() {
         className={`${nightMode ? 'night-mode' : ''} h-full w-full pt-8 ${showAudioPlayer ? 'pb-16' : ''}`}
         onClick={() => currentTool === 'none' && showToolbar === false ? setShowToolbar(true) : null}
       >
-        {/* 初始加载状态 - 修改为更友好的提示 */}
+        {/* 初始加载状态 - 现在由 PdfViewerClient 内部处理 */}
         {initialLoad && (
           <div className="fixed inset-0 flex items-center justify-center bg-background/75 backdrop-blur-sm z-10">
             <div className="flex flex-col items-center space-y-4 p-6 rounded-lg bg-card/80 shadow-lg max-w-[90%]">
@@ -1343,11 +1847,11 @@ export function PdfViewerClient() {
               </div>
               <p className="text-sm font-medium">正在加载文档...</p>
               <p className="text-xs text-muted-foreground text-center">
-                {loadAttempts > 0
+                {fromCache ? '从缓存加载...' : loadAttempts > 0
                   ? "加载时间较长，正在重试..."
                   : "首次加载可能需要较长时间，请耐心等待"}
               </p>
-              {loadAttempts > 0 && (
+              {loadAttempts > 0 && !fromCache && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1393,11 +1897,36 @@ export function PdfViewerClient() {
                     setError(null);
                     setLoading(true);
                     setInitialLoad(true);
+                    setDocumentLoaded(false);
                     // 强制重新加载页面
                     window.location.reload();
                   }}
                 >
                   重新加载
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // 尝试恢复加载，不刷新页面
+                    setError(null);
+                    setLoading(true);
+                    setLoadAttempts(prev => prev + 1);
+                    // 短时间后重新检查状态
+                    setTimeout(() => {
+                      // 如果还是在加载状态，显示提示
+                      if (loading && !documentLoaded) {
+                        toast({
+                          title: "恢复失败",
+                          description: "请尝试重新加载或返回",
+                          variant: "destructive",
+                          duration: 3000,
+                        });
+                      }
+                    }, 2000);
+                  }}
+                >
+                  尝试恢复
                 </Button>
                 <Button
                   variant="outline"
@@ -1421,7 +1950,7 @@ export function PdfViewerClient() {
         >
           <div className="flex justify-center w-full px-2 md:px-4">
             <Document
-              file={pdfUrl}
+              file={pdfData || (selectedPdfFile ? `/content/${selectedPdfFile.path}` : '')}
               onLoadSuccess={onDocumentLoadSuccess}
               onLoadError={onDocumentLoadError}
               loading={null}
