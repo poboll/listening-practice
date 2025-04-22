@@ -1,0 +1,193 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+    --primary: 0 0% 12%;
+    --primary-rgb: 30, 30, 30;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 12%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 12%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 0 0% 12%;
+    --radius: 0.5rem;
+
+    --highlight-yellow: 45 100% 70%;
+    --highlight-blue: 210 100% 70%;
+    --highlight-pink: 330 100% 70%;
+  }
+
+  .dark {
+    --background: 0 0% 8%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-rgb: 250, 250, 250;
+    --primary-foreground: 0 0% 12%;
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 65%;
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 0 0% 80%;
+
+    --highlight-yellow: 45 80% 60%;
+    --highlight-blue: 210 80% 60%;
+    --highlight-pink: 330 80% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* 亚克力效果 */
+  .acrylic {
+    @apply bg-white/70 dark:bg-black/70 backdrop-blur-md backdrop-saturate-150 border border-white/20 dark:border-white/10;
+  }
+
+  .acrylic-subtle {
+    @apply bg-white/50 dark:bg-black/50 backdrop-blur-sm backdrop-saturate-150 border border-white/10 dark:border-white/5;
+  }
+}
+
+/* PDF查看器样式 */
+.pdf-viewer-container {
+  @apply fixed inset-0 z-50 bg-background flex flex-col;
+}
+
+.pdf-document {
+  @apply transition-all duration-300 ease-out mx-auto;
+}
+
+.pdf-document canvas {
+  @apply rounded shadow-lg transition-all duration-300 ease-out;
+}
+
+/* PDF夜间模式 */
+.night-mode .react-pdf__Page {
+  @apply bg-black !important;
+}
+
+.night-mode .react-pdf__Page__canvas {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+.night-mode .react-pdf__Page__textContent {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* 量子点效果 */
+.quantum-dot {
+  @apply relative overflow-hidden isolate;
+}
+
+.quantum-dot::before {
+  content: "";
+  @apply absolute inset-0 bg-gradient-to-br from-black/5 to-transparent dark:from-white/5 -z-10;
+}
+
+.quantum-dot::after {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.08) 0, transparent 70%);
+  animation: quantum 15s linear infinite;
+  z-index: -10;
+}
+
+.dark .quantum-dot::after {
+  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.05) 0, transparent 70%);
+}
+
+@keyframes quantum {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+
+  100% {
+    transform: translateY(-10%) rotate(360deg);
+  }
+}
+
+.animate-quantum {
+  animation: quantum 15s linear infinite;
+}
+
+/* 隐藏滚动条但允许滚动 */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* 笔触效果 */
+.annotation-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.annotation-container.active {
+  pointer-events: auto;
+}
+
+/* 荧光笔高亮 */
+.highlight-yellow {
+  background-color: hsl(var(--highlight-yellow) / 40%);
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+}
+
+.highlight-blue {
+  background-color: hsl(var(--highlight-blue) / 40%);
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+}
+
+.highlight-pink {
+  background-color: hsl(var(--highlight-pink) / 40%);
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+}
+
+/* 不同设备的优化 */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .pdf-document canvas {
+    @apply shadow-xl;
+  }
+}

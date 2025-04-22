@@ -1,0 +1,385 @@
+.custom-audio-player.rhap_container {
+  box-shadow: none;
+  background-color: transparent;
+  padding: 0;
+}
+
+.custom-audio-player .rhap_main {
+  display: flex;
+  flex-direction: column;
+}
+
+.custom-audio-player .rhap_progress-section {
+  margin: 0;
+}
+
+.custom-audio-player .rhap_controls-section {
+  margin-top: 8px;
+}
+
+.custom-audio-player .rhap_additional-controls,
+.custom-audio-player .rhap_volume-controls {
+  flex: 0;
+}
+
+.custom-audio-player .rhap_progress-indicator {
+  width: 12px;
+  height: 12px;
+  top: -4px;
+  background: linear-gradient(to right, #6366f1, #8b5cf6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s;
+}
+
+.custom-audio-player .rhap_progress-indicator:hover {
+  transform: scale(1.2);
+}
+
+.custom-audio-player .rhap_progress-bar {
+  height: 4px;
+  background-color: rgba(99, 102, 241, 0.1);
+}
+
+.custom-audio-player .rhap_volume-bar {
+  height: 4px;
+  background-color: rgba(99, 102, 241, 0.1);
+}
+
+.custom-audio-player .rhap_volume-indicator {
+  width: 12px;
+  height: 12px;
+  top: -4px;
+  background: linear-gradient(to right, #6366f1, #8b5cf6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s;
+}
+
+.custom-audio-player .rhap_volume-indicator:hover {
+  transform: scale(1.2);
+}
+
+.custom-audio-player .rhap_progress-filled {
+  background: linear-gradient(to right, #6366f1, #8b5cf6);
+}
+
+.custom-audio-player .rhap_button-clear {
+  color: hsl(var(--foreground));
+  transition: transform 0.2s;
+}
+
+.custom-audio-player .rhap_button-clear:hover {
+  transform: scale(1.1);
+}
+
+.custom-audio-player .rhap_time {
+  font-size: 12px;
+  color: hsl(var(--foreground));
+  opacity: 0.8;
+}
+
+/* 夜间模式支持 */
+:root[class~="dark"] .custom-audio-player .rhap_progress-bar,
+:root[class~="dark"] .custom-audio-player .rhap_volume-bar {
+  background-color: rgba(139, 92, 246, 0.2);
+}
+
+/* 添加脉动动画 */
+@keyframes pulse-border {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
+  }
+
+  70% {
+    box-shadow: 0 0 0 6px rgba(99, 102, 241, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+  }
+}
+
+.custom-audio-player.playing .rhap_progress-indicator,
+.custom-audio-player.playing .rhap_volume-indicator {
+  animation: pulse-border 2s infinite;
+}
+
+/* Safari 兼容性修复 */
+@supports (-webkit-touch-callout: none) {
+  .custom-audio-player .rhap_volume-container {
+    display: none;
+  }
+}
+
+/* Vercel 风格音频播放器样式 */
+.vercel-audio-player.rhap_container {
+  box-shadow: none;
+  background-color: transparent;
+  padding: 0;
+  width: 100%;
+}
+
+.vercel-audio-player .rhap_main {
+  display: flex;
+  flex-direction: column;
+}
+
+.vercel-audio-player .rhap_progress-section {
+  margin: 0;
+}
+
+.vercel-audio-player .rhap_controls-section {
+  margin-top: 8px;
+  display: none;
+  /* 隐藏原有控制按钮，使用自定义控制按钮 */
+}
+
+.vercel-audio-player .rhap_additional-controls {
+  display: none;
+}
+
+.vercel-audio-player .rhap_volume-controls {
+  margin-top: 8px;
+}
+
+.vercel-audio-player .rhap_progress-indicator {
+  width: 8px;
+  height: 8px;
+  top: -3px;
+  background: #000;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s;
+}
+
+.dark .vercel-audio-player .rhap_progress-indicator {
+  background: #fff;
+}
+
+.vercel-audio-player .rhap_progress-indicator:hover {
+  transform: scale(1.2);
+}
+
+.vercel-audio-player .rhap_progress-bar {
+  height: 3px;
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.dark .vercel-audio-player .rhap_progress-bar {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.vercel-audio-player .rhap_progress-filled {
+  background: #000;
+}
+
+.dark .vercel-audio-player .rhap_progress-filled {
+  background: #fff;
+}
+
+.vercel-audio-player .rhap_volume-bar {
+  height: 3px;
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.dark .vercel-audio-player .rhap_volume-bar {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.vercel-audio-player .rhap_volume-indicator {
+  width: 8px;
+  height: 8px;
+  top: -3px;
+  background: #000;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.dark .vercel-audio-player .rhap_volume-indicator {
+  background: #fff;
+}
+
+.vercel-audio-player .rhap_volume-indicator:hover {
+  transform: scale(1.2);
+}
+
+.vercel-audio-player .rhap_button-clear {
+  color: #000;
+}
+
+.dark .vercel-audio-player .rhap_button-clear {
+  color: #fff;
+}
+
+.vercel-audio-player .rhap_time {
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
+}
+
+.dark .vercel-audio-player .rhap_time {
+  color: #999;
+}
+
+/* 自定义播放按钮悬停效果 */
+.vercel-audio-player button:hover {
+  transform: scale(1.05);
+  transition: transform 0.2s ease;
+}
+
+/* 时间框移到进度条下方 */
+.vercel-audio-player .rhap_time {
+  margin-top: 6px;
+}
+
+/* 音量控制样式 */
+.vercel-audio-player .rhap_volume-container {
+  margin-top: 8px;
+}
+
+/* PDF阅读器中的音频播放器样式 */
+.pdf-audio-player .rhap_container {
+  padding: 4px 2px;
+  box-shadow: none;
+  width: 100%;
+  min-width: 100%;
+}
+
+.pdf-audio-player .rhap_time {
+  font-size: 10px;
+}
+
+.pdf-audio-player .rhap_play-pause-button {
+  font-size: 22px;
+  width: 28px;
+  height: 28px;
+}
+
+.pdf-audio-player .rhap_volume-button {
+  font-size: 16px;
+  width: 20px;
+  height: 20px;
+}
+
+.pdf-audio-player .rhap_forward-button,
+.pdf-audio-player .rhap_rewind-button,
+.pdf-audio-player .rhap_skip-button,
+.pdf-audio-player .rhap_previous-button,
+.pdf-audio-player .rhap_main-controls-button {
+  font-size: 18px;
+  width: 26px;
+  height: 26px;
+}
+
+.pdf-audio-player .rhap_progress-section {
+  flex: 2 0 auto;
+}
+
+.pdf-audio-player .rhap_controls-section {
+  flex: 1 0 auto;
+}
+
+.pdf-audio-player .rhap_progress-bar {
+  height: 3px;
+}
+
+.pdf-audio-player .rhap_progress-indicator {
+  width: 10px;
+  height: 10px;
+  top: -3.5px;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .pdf-audio-player .rhap_container {
+    padding: 2px 0;
+  }
+
+  .pdf-audio-player .rhap_play-pause-button {
+    font-size: 20px;
+    width: 24px;
+    height: 24px;
+  }
+
+  .pdf-audio-player .rhap_volume-button {
+    font-size: 14px;
+    width: 18px;
+    height: 18px;
+  }
+
+  .pdf-audio-player .rhap_forward-button,
+  .pdf-audio-player .rhap_rewind-button,
+  .pdf-audio-player .rhap_skip-button,
+  .pdf-audio-player .rhap_previous-button,
+  .pdf-audio-player .rhap_main-controls-button {
+    font-size: 16px;
+    width: 22px;
+    height: 22px;
+  }
+}
+
+/* 页面翻转动画 */
+@keyframes pageFlipPrev {
+  0% {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pageFlipNext {
+  0% {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-flip-prev {
+  animation: pageFlipPrev 0.3s ease-out;
+}
+
+.page-flip-next {
+  animation: pageFlipNext 0.3s ease-out;
+}
+
+/* 滚动视图样式 */
+.pdf-scroll-view {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
+}
+
+.pdf-scroll-view::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pdf-scroll-view::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pdf-scroll-view::-webkit-scrollbar-thumb {
+  background-color: rgba(155, 155, 155, 0.5);
+  border-radius: 3px;
+}
+
+/* 夜间模式样式 */
+.night-mode .rhap_progress-filled {
+  background-color: #7c7cff;
+}
+
+.night-mode .rhap_progress-indicator {
+  background-color: #9f9fff;
+}
+
+.night-mode .rhap_button-clear {
+  color: #e0e0e0;
+}
+
+.night-mode .rhap_time {
+  color: #b0b0b0;
+}
