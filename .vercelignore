@@ -2,7 +2,6 @@
 .git
 .github
 node_modules
-public/content
 # 测试文件
 **/*.test.js
 **/*.test.tsx
