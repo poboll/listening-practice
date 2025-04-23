@@ -5,11 +5,18 @@ const withBundleAnalyzer = process.env.ANALYZE === 'true'
   ? require('@next/bundle-analyzer')({ enabled: true })
   : (config) => config;
 
+// 确保正确设置环境变量
+const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL;
+
 const nextConfig = {
   reactStrictMode: true,
   compress: true, // 启用gzip压缩
   poweredByHeader: false, // 移除X-Powered-By头
   productionBrowserSourceMaps: false, // 不生成生产环境的sourcemap
+  swcMinify: true, // 使用SWC进行代码压缩
+  experimental: {
+    forceSwcTransforms: true, // 强制使用SWC，即使存在Babel配置
+  },
   webpack: (config, { isServer, dev }) => {
     // 添加对音频文件的支持
     config.module.rules.push({
