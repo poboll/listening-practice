@@ -18,6 +18,8 @@ const PdfViewerClient = dynamic(
 export function PdfViewer() {
   // 添加浏览器性能检测
   const [isHighPerformance, setIsHighPerformance] = useState<boolean | null>(null);
+  // 添加渐进式加载支持标志
+  const [supportsProgressiveLoading, setSupportsProgressiveLoading] = useState<boolean>(true);
   const { selectedPdfFile, fetchDirectoryContent } = useFileContext();
 
   // 确保从最近阅读记录进入时加载PDF所在目录的内容
@@ -82,10 +84,13 @@ export function PdfViewer() {
     }
   }, []);
 
-  // 将 isHighPerformance 传递给 PdfViewerClient
+  // 将 isHighPerformance 和 supportsProgressiveLoading 传递给 PdfViewerClient
   return (
     <div className="fixed inset-0 z-30 w-full h-full bg-background overflow-hidden">
-      <PdfViewerClient isHighPerformance={isHighPerformance} />
+      <PdfViewerClient
+        isHighPerformance={isHighPerformance}
+        supportsProgressiveLoading={supportsProgressiveLoading}
+      />
     </div>
   );
 }

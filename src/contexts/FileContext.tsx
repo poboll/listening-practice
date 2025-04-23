@@ -83,51 +83,82 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // 加载目录内容
+  // 用于防止重复请求的缓存
+  const directoryCache = React.useRef<Record<string, DirectoryContent>>({});
+  // 用于防抖的定时器引用
+  const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // 加载目录内容 - 添加防抖和缓存机制
   const fetchDirectoryContent = async (path: string) => {
-    console.log(`FileContext: 开始加载目录内容，路径=${path}`);
-    setLoading(true);
-    setError(null);
-    try {
-      // 构造API请求路径
-      const apiPath = path ? `public/content/${path}` : 'public/content';
-      console.log(`FileContext: 请求目录内容: ${apiPath}`);
-      const response = await fetch(`/api/files?path=${encodeURIComponent(apiPath)}`);
-
-      if (!response.ok) {
-        throw new Error(`加载目录失败: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      console.log('FileContext: API返回数据:', data);
-
-      // 将返回的数据转换为DirectoryContent格式
-      if (Array.isArray(data)) {
-        console.log(`FileContext: 收到数组数据，包含${data.length}个项目`);
-        const items = data.map(item => ({
-          name: item.name,
-          path: item.path.replace('public/content/', ''), // 移除前缀路径
-          isDirectory: item.type === 'directory',
-          type: item.type
-        }));
-
-        const directoryContentData = {
-          path: path,
-          items: items
-        };
-        console.log('FileContext: 转换后的目录内容:', directoryContentData);
-        setDirectoryContent(directoryContentData);
-      } else {
-        // 如果已经是DirectoryContent格式就直接使用
-        console.log('FileContext: 收到对象数据，直接设置');
-        setDirectoryContent(data);
-      }
-    } catch (err) {
-      console.error("FileContext: 加载目录失败:", err);
-      setError(err instanceof Error ? err.message : "未知错误");
-    } finally {
-      setLoading(false);
+    // 如果当前目录内容已经是请求的路径，直接返回
+    if (directoryContent && directoryContent.path === path) {
+      console.log(`FileContext: 目录 ${path} 内容已加载，跳过重复请求`);
+      return;
     }
+
+    // 检查缓存
+    if (directoryCache.current[path]) {
+      console.log(`FileContext: 使用缓存的目录内容，路径=${path}`);
+      setDirectoryContent(directoryCache.current[path]);
+      return;
+    }
+
+    // 清除之前的防抖定时器
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // 设置防抖，300ms内的重复请求会被忽略
+    debounceTimerRef.current = setTimeout(async () => {
+      console.log(`FileContext: 开始加载目录内容，路径=${path}`);
+      setLoading(true);
+      setError(null);
+      try {
+        // 构造API请求路径
+        const apiPath = path ? `public/content/${path}` : 'public/content';
+        console.log(`FileContext: 请求目录内容: ${apiPath}`);
+        const response = await fetch(`/api/files?path=${encodeURIComponent(apiPath)}`);
+
+        if (!response.ok) {
+          throw new Error(`加载目录失败: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        console.log('FileContext: API返回数据:', data);
+
+        // 将返回的数据转换为DirectoryContent格式
+        if (Array.isArray(data)) {
+          console.log(`FileContext: 收到数组数据，包含${data.length}个项目`);
+          const items = data.map(item => ({
+            name: item.name,
+            path: item.path.replace('public/content/', ''), // 移除前缀路径
+            isDirectory: item.type === 'directory',
+            type: item.type
+          }));
+
+          const directoryContentData = {
+            path: path,
+            items: items
+          };
+          console.log('FileContext: 转换后的目录内容:', directoryContentData);
+
+          // 更新状态并保存到缓存
+          setDirectoryContent(directoryContentData);
+          directoryCache.current[path] = directoryContentData;
+        } else {
+          // 如果已经是DirectoryContent格式就直接使用
+          console.log('FileContext: 收到对象数据，直接设置');
+          setDirectoryContent(data);
+          // 保存到缓存
+          directoryCache.current[path] = data;
+        }
+      } catch (err) {
+        console.error("FileContext: 加载目录失败:", err);
+        setError(err instanceof Error ? err.message : "未知错误");
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
   };
 
   // 选择文件
@@ -140,7 +171,7 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // 选择PDF文件并导航到PDF查看器
+  // 选择PDF文件并导航到PDF查看器 - 支持渐进式加载
   const selectPdfAndView = useCallback((file: FileItem) => {
     setSelectedPdfFile(file);
     console.log("选择PDF文件:", file.name);
@@ -170,6 +201,10 @@ export function FileProvider({ children }: { children: React.ReactNode }) {
         setCurrentAudioFile(relatedAudioFiles[0]);
       }
     }
+
+    // 预加载PDF文件信息 - 支持渐进式加载
+    // 这里不需要等待完全加载，PdfViewerClient组件会处理渐进式加载
+    console.log("开始渐进式加载PDF文件:", file.path);
 
     // 导航到PDF查看器
     router.push('/pdf-viewer');

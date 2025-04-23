@@ -141,7 +141,7 @@ export default function Home() {
 
           <div className="hidden md:flex items-center gap-2">
             <a
-              href="https://github.com/yourusername/english-listening-practice"
+              href="https://github.com/poboll/listening-practice"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400 hover:text-primary transition-colors"
@@ -151,7 +151,7 @@ export default function Home() {
             </a>
 
             <a
-              href="#"
+              href="/about"
               className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400 hover:text-primary transition-colors"
             >
               <Info className="h-4 w-4" />

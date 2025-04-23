@@ -142,10 +142,13 @@ const LazyPage = ({ pageNumber, scale, rotation, onPageLoadSuccess }: LazyPagePr
 
 interface PdfViewerClientProps {
   isHighPerformance: boolean | null;
+  supportsProgressiveLoading?: boolean;
 }
 
 // 添加 Props 定义并解构
-export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
+export function PdfViewerClient({ isHighPerformance, supportsProgressiveLoading = true }: PdfViewerClientProps) {
+  // 使用渐进式加载支持标志
+  const [enableProgressiveLoading, setEnableProgressiveLoading] = useState<boolean>(supportsProgressiveLoading);
   const router = useRouter();
   const { selectedPdfFile, setSelectedFile, directoryContent, playAudio, clearAudio, fetchDirectoryContent } = useFileContext();
   const { updateReadingProgress, exitReading } = useReadingProgress();
@@ -348,20 +351,40 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
     }
   }, [directoryContent, selectedPdfFile]);
 
-  // 扫描相关音频文件的函数
+  // 修改scanForRelatedAudioFiles函数，添加扫描状态标记和检查逻辑
+
+  // 1. 在组件开始处添加扫描状态跟踪
+  const [audioScanned, setAudioScanned] = useState<boolean>(false);
+  const audioScanningRef = useRef<boolean>(false);
+  const lastScannedDirRef = useRef<string>('');
+
+  // 2. 修改扫描函数，添加防重复机制
   const scanForRelatedAudioFiles = async () => {
-    if (!selectedPdfFile) return;
+    if (!selectedPdfFile || audioScanningRef.current) return;
 
     try {
+      audioScanningRef.current = true;
       const pdfPath = selectedPdfFile.path;
       const pdfDir = pdfPath.substring(0, pdfPath.lastIndexOf('/'));
       const pdfBaseName = pdfPath.substring(pdfPath.lastIndexOf('/') + 1).replace('.pdf', '');
 
+      // 检查是否已经扫描过同一目录
+      if (lastScannedDirRef.current === pdfDir && audioScanned) {
+        console.log('已经扫描过该目录，跳过重复扫描:', pdfDir);
+        audioScanningRef.current = false;
+        return;
+      }
+
       // 检查是否有目录内容，如果没有先加载当前PDF所在目录
       if (!directoryContent || directoryContent.path !== pdfDir) {
         console.log('从PDF直接进入，需要加载目录内容:', pdfDir);
-        // 先尝试加载PDF所在目录的内容
+        // 设置状态，避免多次加载同一目录
         await fetchDirectoryContent(pdfDir);
+        // 记录已扫描的目录
+        lastScannedDirRef.current = pdfDir;
+        // 加载完成后直接返回，让下一次useEffect触发时继续处理
+        audioScanningRef.current = false;
+        return;
       }
 
       // 现在directoryContent应该已经更新了，再次检查
@@ -385,11 +408,9 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
 
         console.log('发现相关音频文件:', relatedAudioFiles.length, relatedAudioFiles);
         setAudioFiles(relatedAudioFiles);
-
-        // 如果有音频文件但尚未设置当前音频，自动设置第一个
-        if (relatedAudioFiles.length > 0 && !currentAudioFile) {
-          setCurrentAudioIndex(0);
-        }
+        setAudioScanned(true);
+        // 记录已扫描的目录
+        lastScannedDirRef.current = pdfDir;
       }
     } catch (error) {
       console.error('扫描音频文件失败:', error);
@@ -399,6 +420,94 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
         variant: "destructive",
         duration: 3000,
       });
+    } finally {
+      audioScanningRef.current = false;
+    }
+  };
+
+  // 3. 修改处理directoryContent变更的useEffect
+  useEffect(() => {
+    // 当PDF文件和目录内容都存在时，才尝试扫描音频文件
+    // 增加条件：确保当前不在扫描中，且PDF所在目录与已扫描目录不同
+    if (
+      selectedPdfFile &&
+      directoryContent &&
+      !audioScanningRef.current &&
+      (
+        !audioScanned ||
+        lastScannedDirRef.current !== selectedPdfFile.path.substring(0, selectedPdfFile.path.lastIndexOf('/'))
+      )
+    ) {
+      scanForRelatedAudioFiles();
+    }
+  }, [directoryContent, selectedPdfFile]);
+
+  // 4. 修改toggleAudioPlayer函数，避免无限循环
+  const toggleAudioPlayer = () => {
+    // 确保已经扫描到了音频文件
+    if (audioFiles.length === 0 && !audioScanned) {
+      // 如果没有音频文件，尝试再次扫描
+      setAudioScanned(false); // 允许重新扫描
+      scanForRelatedAudioFiles();
+
+      // 推迟显示提示，等待扫描完成
+      setTimeout(() => {
+        if (audioFiles.length === 0) {
+          toast({
+            title: "未找到音频文件",
+            description: "当前PDF没有相关联的音频文件",
+            duration: 3000,
+          });
+        }
+      }, 500);
+      return;
+    }
+
+    // 如果当前有音频文件正在播放，则停止播放
+    if (audioFiles.length > 0 && currentAudioIndex >= 0 && currentAudioIndex < audioFiles.length) {
+      clearAudio();
+      playAudio(audioFiles[currentAudioIndex]);
+    }
+    // 如果有可用的音频文件但未播放，则开始播放第一个
+    else if (audioFiles.length > 0) {
+      playAudio(audioFiles[0]);
+      setCurrentAudioIndex(0);
+    }
+  };
+
+  // 5. 改进handleExitReading函数，确保清理音频状态
+  const handleExitReading = () => {
+    // 保存当前阅读进度
+    if (selectedPdfFile && numPages) {
+      const completionPercentage = (pageNumber / numPages) * 100;
+      updateReadingProgress({
+        filePath: selectedPdfFile.path,
+        fileName: selectedPdfFile.name,
+        currentPage: pageNumber,
+        totalPages: numPages,
+        lastReadAt: new Date().toISOString(),
+        completionPercentage
+      });
+
+      // 关闭音频播放器 - 使用clearAudio方法关闭全局音频播放器
+      clearAudio();
+      setAudioScanned(false); // 重置音频扫描状态
+
+      // 退出阅读，返回首页
+      exitReading();
+      setSelectedFile(null);
+
+      // 强制重置UI状态
+      setLoadedPages(new Set());
+      setVisiblePages([]);
+      setNumPages(null);
+      setLoading(false);
+      setInitialLoad(false);
+
+      // 延迟一下再返回首页，让状态有时间更新
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 100);
     }
   };
 
@@ -625,6 +734,73 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
     if (loadingTimeoutRef.current) {
       clearTimeout(loadingTimeoutRef.current);
       loadingTimeoutRef.current = null;
+    }
+
+    // 检查是否已经显示过加载完成的toast
+    const hasShownLoadedToast = sessionStorage.getItem(`shown-loaded-toast-${selectedPdfFile?.path}`);
+    if (!hasShownLoadedToast && selectedPdfFile) {
+      toast({
+        title: "文档加载完成",
+        description: `共${numPages}页`,
+        duration: 2000,
+      });
+      // 设置标记，避免重复显示
+      sessionStorage.setItem(`shown-loaded-toast-${selectedPdfFile.path}`, 'true');
+    }
+  };
+
+  // 添加处理文档加载进度的函数
+  const [loadingProgress, setLoadingProgress] = useState<number>(0);
+  const [availablePages, setAvailablePages] = useState<number>(0);
+  const [isPartialLoading, setIsPartialLoading] = useState<boolean>(false);
+
+  const onLoadProgress = ({ loaded, total }: { loaded: number, total: number }) => {
+    // 计算加载进度百分比
+    const progress = Math.round((loaded / total) * 100);
+    setLoadingProgress(progress);
+
+    // 如果加载进度大于10%但小于100%，标记为部分加载状态
+    if (progress > 10 && progress < 100) {
+      setIsPartialLoading(true);
+    }
+
+    // 如果加载完成，延迟隐藏加载状态以避免闪烁
+    if (progress >= 100) {
+      // 不要立即隐藏，设置延迟
+      setTimeout(() => {
+        setIsPartialLoading(false);
+      }, 2000); // 2秒延迟，让用户能看到完成状态
+    }
+
+    // 根据加载进度估算可用页面数量
+    // 这是一个估计值，因为我们不知道确切的可用页面，但可以根据加载比例来估算
+    if (numPages) {
+      const estimatedAvailablePages = Math.max(1, Math.floor((numPages * loaded) / total));
+      setAvailablePages(estimatedAvailablePages);
+
+      // 如果有新的可用页面，更新可见页面数组
+      if (estimatedAvailablePages > visiblePages.length) {
+        const newVisiblePages = [];
+        for (let i = 1; i <= estimatedAvailablePages && i <= numPages; i++) {
+          newVisiblePages.push(i);
+        }
+        setVisiblePages(newVisiblePages);
+      }
+    }
+
+    // 如果加载进度超过20%，可以提前显示已加载的内容
+    if (progress > 20 && loading) {
+      setLoading(false);
+      setInitialLoad(false);
+
+      // 显示部分加载提示
+      if (progress < 100) {
+        toast({
+          title: "文档部分加载",
+          description: `已加载${progress}%，可以开始阅读`,
+          duration: 3000,
+        });
+      }
     }
   };
 
@@ -1075,61 +1251,6 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
           duration: 2000,
         });
       }
-    }
-  };
-
-  const handleExitReading = () => {
-    // 保存当前阅读进度
-    if (selectedPdfFile && numPages) {
-      const completionPercentage = (pageNumber / numPages) * 100;
-      updateReadingProgress({
-        filePath: selectedPdfFile.path,
-        fileName: selectedPdfFile.name,
-        currentPage: pageNumber,
-        totalPages: numPages,
-        lastReadAt: new Date().toISOString(),
-        completionPercentage
-      });
-
-      // 关闭音频播放器 - 使用clearAudio方法关闭全局音频播放器
-      clearAudio();
-
-      // 退出阅读，返回首页
-      exitReading();
-      setSelectedFile(null);
-
-      // 使用window.location.href强制刷新并返回首页，确保完全清除PDF查看器状态
-      window.location.href = '/';
-    }
-  };
-
-  // 音频播放功能 - 修改toggleAudioPlayer使用全局状态
-  const toggleAudioPlayer = () => {
-    // 确保已经扫描到了音频文件
-    if (audioFiles.length === 0) {
-      // 如果没有音频文件，尝试再次扫描
-      scanForRelatedAudioFiles();
-
-      // 如果仍然没有找到，显示提示
-      if (audioFiles.length === 0) {
-        toast({
-          title: "未找到音频文件",
-          description: "当前PDF没有相关联的音频文件",
-          duration: 3000,
-        });
-        return;
-      }
-    }
-
-    // 如果当前有音频文件正在播放，则停止播放
-    if (audioFiles.length > 0 && currentAudioIndex >= 0 && currentAudioIndex < audioFiles.length) {
-      clearAudio();
-      playAudio(audioFiles[currentAudioIndex]);
-    }
-    // 如果有可用的音频文件但未播放，则开始播放第一个
-    else if (audioFiles.length > 0) {
-      playAudio(audioFiles[0]);
-      setCurrentAudioIndex(0);
     }
   };
 
@@ -1837,10 +1958,25 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
                 ))}
               </div>
               <p className="text-sm font-medium">正在加载文档...</p>
+
+              {/* 渐进式加载进度条 */}
+              {loadingProgress > 0 && (
+                <div className="w-full max-w-xs">
+                  <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
+                    <div
+                      className="bg-primary h-2 rounded-full transition-all duration-300 ease-in-out"
+                      style={{ width: `${loadingProgress}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-center mt-1">{loadingProgress}%</p>
+                </div>
+              )}
+
               <p className="text-xs text-muted-foreground text-center">
-                {fromCache ? '从缓存加载...' : loadAttempts > 0
-                  ? "加载时间较长，正在重试..."
-                  : "首次加载可能需要较长时间，请耐心等待"}
+                {isPartialLoading ? '文档部分加载中，即将可以阅读...' :
+                  fromCache ? '从缓存加载...' : loadAttempts > 0
+                    ? "加载时间较长，正在重试..."
+                    : "首次加载可能需要较长时间，请耐心等待"}
               </p>
               {loadAttempts > 0 && !fromCache && (
                 <Button
@@ -1944,9 +2080,29 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
               file={pdfData || (selectedPdfFile ? `/content/${selectedPdfFile.path}` : '')}
               onLoadSuccess={onDocumentLoadSuccess}
               onLoadError={onDocumentLoadError}
+              onLoadProgress={onLoadProgress}
               loading={null}
               className="w-full max-w-3xl mx-auto flex flex-col items-center"
             >
+              {/* 渐进式加载进度指示器 */}
+              {isPartialLoading && (
+                <div className="fixed bottom-4 right-4 bg-background/80 backdrop-blur-sm p-2 rounded-lg shadow-lg z-50">
+                  <div className="flex flex-col items-center">
+                    <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 mb-1">
+                      <div
+                        className="bg-primary h-2.5 rounded-full transition-all duration-300 ease-in-out"
+                        style={{ width: `${loadingProgress}%` }}
+                      ></div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {loadingProgress >= 100
+                        ? `已加载全部 ${numPages} 页`
+                        : `已加载 ${loadingProgress}% ${availablePages > 0 ? `(约${availablePages}页可读)` : ''}`
+                      }
+                    </div>
+                  </div>
+                </div>
+              )}
               {visiblePages.map((pageNum) => (
                 <div key={`page_${pageNum}`} className="mb-6 w-full flex justify-center">
                   <LazyPage
@@ -1983,4 +2139,4 @@ export function PdfViewerClient({ isHighPerformance }: PdfViewerClientProps) {
       </div>
     </div>
   );
-} 
+}

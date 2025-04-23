@@ -2,6 +2,15 @@
   "name": "english-listening-practice",
   "version": "0.1.0",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/poboll/listening-practice"
+  },
+  "author": "温瞳 <contact@caiths.com>",
+  "homepage": "https://github.com/poboll/listening-practice",
+  "bugs": {
+    "url": "https://github.com/poboll/listening-practice/issues"
+  },
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
