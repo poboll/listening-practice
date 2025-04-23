@@ -1,6 +1,5 @@
 "use client";
 
-import { Card } from '@/components/ui/card';
 import dynamic from 'next/dynamic';
 import { useState, useEffect } from 'react';
 import { useFileContext } from '@/contexts/FileContext';
@@ -11,7 +10,14 @@ const PdfViewerClient = dynamic(
   () => import('./PdfViewerClient').then(mod => mod.PdfViewerClient),
   {
     ssr: false,
-    // loading: () => <PdfLoadingFallback /> // 移除加载组件
+    loading: () => (
+      <div className="fixed inset-0 z-30 w-full h-full bg-background overflow-hidden flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin inline-block w-8 h-8 border-4 rounded-full border-primary border-t-transparent"></div>
+          <p className="mt-2 text-sm text-muted-foreground">加载PDF查看器...</p>
+        </div>
+      </div>
+    )
   }
 );
 
@@ -67,6 +73,7 @@ export function PdfViewer() {
         return isHighEnd;
       } catch (e) {
         console.error('性能检测出错:', e);
+        setIsHighPerformance(false); // 出错时默认为低性能设备
         return false;
       }
     };
