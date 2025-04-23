@@ -13,9 +13,13 @@ const nextConfig = {
   compress: true, // 启用gzip压缩
   poweredByHeader: false, // 移除X-Powered-By头
   productionBrowserSourceMaps: false, // 不生成生产环境的sourcemap
-  swcMinify: true, // 使用SWC进行代码压缩
   experimental: {
     forceSwcTransforms: true, // 强制使用SWC，即使存在Babel配置
+  },
+  // 添加Vercel特定配置
+  env: {
+    VERCEL_ENV: process.env.VERCEL_ENV || '',
+    VERCEL_URL: process.env.VERCEL_URL || '',
   },
   webpack: (config, { isServer, dev }) => {
     // 添加对音频文件的支持
@@ -45,7 +49,7 @@ const nextConfig = {
         // 'react-dom': 'ReactDOM',
       }];
 
-      // 优化CSS处理
+      // 修改CSS处理逻辑，移除minimize选项
       if (config.module && config.module.rules) {
         const cssRule = config.module.rules.find(
           rule => rule.oneOf && Array.isArray(rule.oneOf) && rule.oneOf.some(
@@ -58,8 +62,8 @@ const nextConfig = {
               && subRule.use && Array.isArray(subRule.use)) {
               subRule.use.forEach(loader => {
                 if (loader.options && typeof loader.options === 'object') {
-                  // 将CSS压缩到极致
-                  loader.options.minimize = true;
+                  // 删除minimize选项，因为在新版Next.js中不再支持
+                  delete loader.options.minimize;
                 }
               });
             }
