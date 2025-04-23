@@ -2,7 +2,7 @@
   "version": 2,
   "buildCommand": "npm run vercel-build",
   "cleanUrls": true,
-  "installCommand": "npm ci --only=production",
+  "installCommand": "npm install --omit=dev",
   "github": {
     "silent": true,
     "autoJobCancelation": true
